@@ -58,36 +58,66 @@ function startRace() {
   // Let the browser paint the spinner before we build the scene.
   requestAnimationFrame(() => requestAnimationFrame(() => {
     if (view) { view.dispose(); view = null; }
-    sim = new Sim({
-      windSpeed: Number(settings.wind),
-      windDir: (Math.random() - 0.5) * Math.PI * 2,
-      laps: Number(settings.laps),
-      difficulty: Number(settings.difficulty),
-      rivals: 4,
-      countdown: 20,
-      seed: Math.floor(Math.random() * 10000) + 1
-    });
-    view = new View(scene, sim, { quality: settings.quality, weather: settings.weather });
-    hud = hud || new Hud(hudCanvas);
-    hud.resize();
-    controls = new Controls({ trim: 0.42 });
-    controls.attach(el('helm'), el('sheet'));
-    sim.player.trim = controls.trim;
-    sim.player.autoTrim = Number(settings.assist) === 1;
-
-    sim.race.onEvent = onRaceEvent;
-    view.jumpToBoat();
-    resize();
-
-    hud.message('Get to the line for the gun', 'info', 3.4);
-    finishedAt = 0;
-    paused = false;
-    running = true;
-    last = performance.now();
+    try {
+      buildWorld();
+    } catch (err) {
+      showFailure(err);
+      return;
+    }
     el('loading').classList.add('hidden');
     cancelAnimationFrame(raf);
     raf = requestAnimationFrame(frame);
   }));
+}
+
+/* Build the race. Kept separate so a machine with no working WebGL fails with an
+   explanation rather than a blank screen. */
+function buildWorld() {
+  sim = new Sim({
+    windSpeed: Number(settings.wind),
+    windDir: (Math.random() - 0.5) * Math.PI * 2,
+    laps: Number(settings.laps),
+    difficulty: Number(settings.difficulty),
+    rivals: 4,
+    countdown: 20,
+    seed: Math.floor(Math.random() * 10000) + 1
+  });
+  view = new View(scene, sim, { quality: settings.quality, weather: settings.weather });
+  hud = hud || new Hud(hudCanvas);
+  hud.resize();
+  controls = new Controls({ trim: 0.42 });
+  controls.attach(el('helm'), el('sheet'));
+  sim.player.trim = controls.trim;
+  sim.player.autoTrim = Number(settings.assist) === 1;
+
+  sim.race.onEvent = onRaceEvent;
+  view.jumpToBoat();
+  resize();
+
+  hud.message('Get to the line for the gun', 'info', 3.4);
+  finishedAt = 0;
+  paused = false;
+  running = true;
+  last = performance.now();
+}
+
+function showFailure(err) {
+  running = false;
+  el('loading').classList.add('hidden');
+  el('menuBtn').hidden = true;
+  const box = el('start');
+  box.classList.remove('hidden');
+  const sheetbox = box.querySelector('.sheetbox');
+  if (!sheetbox.querySelector('.gl-error')) {
+    const note = document.createElement('p');
+    note.className = 'sub gl-error';
+    note.style.color = '#ff9d8e';
+    note.textContent = 'This game needs WebGL and this browser would not give it to us. ' +
+      'Try another browser, or switch hardware acceleration back on. (' +
+      String((err && err.message) || err).slice(0, 120) + ')';
+    sheetbox.insertBefore(note, sheetbox.querySelector('.field'));
+  }
+  console.error(err);
 }
 
 function onRaceEvent(e) {
