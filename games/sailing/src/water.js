@@ -4,17 +4,26 @@
 export const G = 9.81;
 export const MAX_WAVES = 8;
 
-/* Fully developed sea: significant wave height from wind speed (Pierson-Moskowitz-ish,
-   trimmed a little so the boat is still sailable at the top of the range). */
+/* Significant wave height from wind speed, in the shape of Pierson-Moskowitz but
+   scaled for the sort of inshore water a race is sailed on: about 0.8 m in 14 knots,
+   1.5 m in 19. */
 export function significantHeight(windSpeed) {
-  return Math.min(3.2, 0.021 * windSpeed * windSpeed);
+  return Math.min(2.6, 0.0155 * windSpeed * windSpeed);
+}
+
+/* How much of a wave a hull of length L actually feels as pitch, roll and surge.
+   Waves much shorter than the boat pass underneath it; long ones tilt the whole hull. */
+function lengthResponse(lambda, hullLength) {
+  const r = lambda / (1.4 * hullLength);
+  return (r * r) / (r * r + 1);
 }
 
 export class WaveField {
-  constructor() {
+  constructor(hullLength = 6.5) {
     this.waves = [];
+    this.hullLength = hullLength;
     this.A = new Float32Array(MAX_WAVES * 4); // dirX, dirZ, amplitude, k
-    this.B = new Float32Array(MAX_WAVES * 4); // steepness, phase, omega, 0
+    this.B = new Float32Array(MAX_WAVES * 4); // steepness, phase, omega, response
     this.count = 0;
   }
 
@@ -46,7 +55,8 @@ export class WaveField {
     for (let i = 0; i < this.count; i++) {
       const w = this.waves[i];
       this.A[i * 4] = w.dx; this.A[i * 4 + 1] = w.dz; this.A[i * 4 + 2] = w.amp; this.A[i * 4 + 3] = w.k;
-      this.B[i * 4] = w.q;  this.B[i * 4 + 1] = w.phase; this.B[i * 4 + 2] = w.omega; this.B[i * 4 + 3] = 0;
+      this.B[i * 4] = w.q; this.B[i * 4 + 1] = w.phase; this.B[i * 4 + 2] = w.omega;
+      this.B[i * 4 + 3] = lengthResponse(2 * Math.PI / w.k, this.hullLength);
     }
     return this;
   }
@@ -65,20 +75,22 @@ export class WaveField {
   /* Surface height and normal at a world point. Horizontal Gerstner displacement is
      ignored for the inverse lookup — the error is a fraction of a metre and the hull
      is metres long. */
-  sample(x, z, t, out = { y: 0, nx: 0, ny: 1, nz: 0, dhdx: 0, dhdz: 0 }) {
-    let y = 0, dhdx = 0, dhdz = 0;
+  sample(x, z, t, out = { y: 0, nx: 0, ny: 1, nz: 0, dhdx: 0, dhdz: 0, hullX: 0, hullZ: 0 }) {
+    let y = 0, dhdx = 0, dhdz = 0, hullX = 0, hullZ = 0;
     for (let i = 0; i < this.count; i++) {
       const o = i * 4;
       const dx = this.A[o], dz = this.A[o + 1], amp = this.A[o + 2], k = this.A[o + 3];
-      const phase = this.B[o + 1], omega = this.B[o + 2];
+      const phase = this.B[o + 1], omega = this.B[o + 2], resp = this.B[o + 3];
       const f = k * (dx * x + dz * z) - omega * t + phase;
       const s = Math.sin(f), c = Math.cos(f);
       y += amp * s;
       const d = amp * k * c;
-      dhdx += d * dx;
-      dhdz += d * dz;
+      dhdx += d * dx; dhdz += d * dz;
+      // The slope the hull actually responds to, short waves discounted.
+      hullX += d * dx * resp; hullZ += d * dz * resp;
     }
     out.y = y; out.dhdx = dhdx; out.dhdz = dhdz;
+    out.hullX = hullX; out.hullZ = hullZ;
     // Normal of the height field (good enough; steep crests lean a touch more in the shader).
     const inv = 1 / Math.sqrt(dhdx * dhdx + dhdz * dhdz + 1);
     out.nx = -dhdx * inv; out.ny = inv; out.nz = -dhdz * inv;

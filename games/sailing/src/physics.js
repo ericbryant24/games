@@ -6,6 +6,9 @@
    Boat frame: u = surge (forward), v = sway (to starboard), r = yaw rate. */
 
 const RHO_AIR = 1.225;
+const CE_LEAD = 0.30;   // rig's centre of effort, metres forward of the CG when upright
+const HEEL_SHIFT = 1.25; // how far that balance point walks aft as the boat heels
+const CE_ARM = 1.15;    // how far the effort swings to leeward as the boom goes out
 const RHO_WATER = 1025;
 const G = 9.81;
 
@@ -48,6 +51,12 @@ export function sailCD(a, cl, ar = 2.8) {
   const sa = Math.sin(a);
   return 0.10 + (cl * cl) / (Math.PI * ar * 0.92) + 1.15 * sa * sa * sa;
 }
+export function wrapAngle(a) {
+  while (a > Math.PI) a -= 2 * Math.PI;
+  while (a < -Math.PI) a += 2 * Math.PI;
+  return a;
+}
+
 export function smoothstep(a, b, x) {
   const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
   return t * t * (3 - 2 * t);
@@ -56,7 +65,8 @@ export function smoothstep(a, b, x) {
 /* Thin high-aspect foil (keel, rudder): linear then a hard stall. */
 function foilCL(a, slope, clMax) {
   const m = Math.abs(a) * slope;
-  const cl = m <= clMax ? m : clMax * Math.max(0.32, 1 - (m - clMax) * 0.55);
+  // Past stall a blade still works like a flat plate — less lift, but far from none.
+  const cl = m <= clMax ? m : clMax * Math.max(0.5, 1 - (m - clMax) * 0.40);
   return Math.sign(a) * cl;
 }
 
@@ -68,7 +78,7 @@ export function hullCt(fn) {
 }
 
 const _wind = { from: 0, speed: 0 };
-const _wave = { y: 0, nx: 0, ny: 1, nz: 0, dhdx: 0, dhdz: 0 };
+const _wave = { y: 0, nx: 0, ny: 1, nz: 0, dhdx: 0, dhdz: 0, hullX: 0, hullZ: 0 };
 const _orb = { x: 0, y: 0, z: 0 };
 
 export class Boat {
@@ -85,6 +95,8 @@ export class Boat {
     this.pitch = 0;
     this.y = 0;
 
+    this.boomSide = 0;    // which side the boom is on: -1 port, +1 starboard
+    this.reef = 0;        // 0 = full sail, 1 = deeply reefed
     this.rudder = 0;      // commanded blade angle, rad, + = bow swings to starboard
     this.trim = 0.35;     // 0 = sheeted flat, 1 = fully eased
     this.spinnaker = false;
@@ -100,8 +112,14 @@ export class Boat {
   }
 
   get speed() { return Math.hypot(this.u, this.v); }
+  /* Working sail area. Rolling in a reef takes area out of the top of the rig, which
+     is why it costs so much less speed than it does heeling moment. */
   get sailAreaNow() {
-    return this.spec.sailArea + (this.spinnaker ? this.spec.spinArea : 0);
+    return this.spec.sailArea * (1 - 0.40 * this.reef) +
+      (this.spinnaker ? this.spec.spinArea : 0);
+  }
+  get heelArmNow() {
+    return this.spec.heelArm * (1 - 0.20 * this.reef);
   }
   /* Bearing the boat is making good over the ground. */
   get courseOverGround() {
@@ -139,29 +157,44 @@ export class Boat {
     const side = awaSigned >= 0 ? 1 : -1;
 
     /* --- sail force -------------------------------------------------------- */
-    // The sheet caps how far the boom can swing out; the wind pushes it to the stop.
-    const sheetMax = 0.075 + this.trim * (this.spinnaker ? 1.62 : 1.48);
-    const boom = Math.min(a, sheetMax);
-    let attack = a - boom;                 // zero attack means the sail is luffing
-    let backed = false;
-    if (attack > Math.PI / 2) { attack = Math.PI - attack; backed = true; }
+    // The boom stays on the side it is on until the wind is clearly across the other
+    // way. That hysteresis is what makes a gybe a real event, and it is what lets a
+    // boat back its sail and steer out of irons instead of parking there forever.
+    const wantSide = -Math.sign(awaSigned || 1);
+    if (!this.boomSide) this.boomSide = wantSide;
+    else if (wantSide !== this.boomSide && a > 0.055 && a < 3.05) this.boomSide = wantSide;
 
+    const sheetMax = 0.075 + this.trim * (this.spinnaker ? 1.62 : 1.48);
+    // Blown out to the sheet stop, or only as far as the wind if the sheet is easier.
+    // Backed means the boom is on the same side the wind is coming from: the wind is
+    // pressing the windward face of the sail.
+    const backed = this.boomSide !== wantSide;
+    const boomMag = backed ? sheetMax : Math.min(a, sheetMax);
+    const beta = this.boomSide * boomMag;             // signed boom angle, + = to starboard
+
+    // Angle between the sail chord and the flow. Positive means the wind is on the
+    // leeward face and the sail is driving; negative means the sail is backed.
+    const alpha = wrapAngle(awaSigned + beta);
+    const attack = Math.abs(alpha);
     const luffing = attack < 0.035;
+
     const cosPhi = Math.cos(this.phi);
-    // Running dead square, the main blankets the headsail and the rig loses bite.
+    // Running square, the main blankets the headsail and the rig loses its bite.
     const blanket = 1 - 0.50 * smoothstep(2.27, 3.0, a);
     const q = 0.5 * RHO_AIR * aws * aws * this.sailAreaNow * blanket * Math.max(0.25, cosPhi);
 
-    let cl = luffing ? 0 : sailCL(attack);
+    let cl = luffing ? 0 : sailCL(attack) * Math.sign(alpha);
     let cd = luffing ? 0.055 : sailCD(attack, cl, this.spinnaker ? 2.2 : 2.8);
-    if (backed) { cl = -cl * 0.35; cd *= 0.55; }            // sail collapsed behind the rig
-    if (this.spinnaker && a < 1.25) { cl *= 0.55; cd *= 0.8; } // kite is useless upwind
+    if (this.spinnaker && a < 1.25) { cl *= 0.55; cd *= 0.8; }   // the kite is no use upwind
+    // A backed sail is half collapsed and flogging, not cleanly driving. It keeps just
+    // enough in it to stop a lazy tack or spin the bow out of irons.
+    if (backed) { cl *= 0.42; cd *= 0.42; }
 
-    // Lift is normal to the flow, drag is along it, both resolved into the boat frame.
-    const liftU = Math.sin(a), liftV = -side * Math.cos(a);
-    const dragU = -Math.cos(a), dragV = -side * Math.sin(a);
-    let sailU = q * (cl * liftU + cd * dragU);
-    let sailV = q * (cl * liftV + cd * dragV);
+    // Drag runs with the flow; lift is square to it.
+    const flowU = -Math.cos(awaSigned), flowV = -Math.sin(awaSigned);
+    const liftU = Math.sin(awaSigned), liftV = -Math.cos(awaSigned);
+    const sailU = q * (cl * liftU + cd * flowU);
+    const sailV = q * (cl * liftV + cd * flowV);
 
     /* --- hull resistance --------------------------------------------------- */
     const u = this.u, v = this.v;
@@ -174,8 +207,8 @@ export class Boat {
     let hullU = -resist * heelPenalty;
 
     /* --- keel: side force and induced drag --------------------------------- */
-    const flowSpeed = Math.max(0.25, Math.abs(u));
-    const leeway = Math.atan2(v, Math.max(0.25, Math.abs(u)));  // + = slipping to starboard
+    const flowSpeed = Math.max(0.4, Math.abs(u));
+    const leeway = Math.atan2(v, Math.max(0.4, Math.abs(u)));  // + = slipping to starboard
     const qw = 0.5 * RHO_WATER * flowSpeed * flowSpeed;
     // The keel is a foil at the leeway angle; its lift opposes the slip.
     const keelCL = foilCL(-leeway, 3.5 * cosPhi, 1.25);
@@ -189,25 +222,34 @@ export class Boat {
     hullU -= keelDrag;
 
     /* --- rudder ------------------------------------------------------------ */
-    // Flow at the blade includes the boat's slip and its rotation.
-    const rudderFlowAngle = leeway * 0.45 + (this.r * S.rudderX) / flowSpeed;
-    const rudderAttack = this.rudder - rudderFlowAngle;
+    // Flow at the blade is the hull's slip plus its rotation about the CG. The keel
+    // and hull straighten a good part of the slip before it gets back there.
+    const bladeSway = (v + this.r * S.rudderX) * 0.55;
+    const bladeFlow = Math.max(0.4, Math.hypot(u, bladeSway));
+    const bladeAngle = Math.atan2(bladeSway, Math.max(0.35, Math.abs(u)));
+    const rudderAttack = this.rudder - bladeAngle;
     const rudCL = foilCL(rudderAttack, 3.2, 1.15);
-    // Lateral force at the blade, + = to starboard. Helm to starboard throws the
-    // stern to port, which is what swings the bow the other way.
-    const rudderSide = -qw * S.rudderArea * rudCL * cosPhi;
-    const rudderDrag = qw * S.rudderArea * (0.010 + (rudCL * rudCL) / (Math.PI * S.rudderAR * 0.9));
+    const qr = 0.5 * RHO_WATER * bladeFlow * bladeFlow;
+    // Lateral force at the blade, + = to starboard. Helm over to starboard throws the
+    // stern to port, which is what swings the bow the other way. Going astern the helm
+    // works backwards, exactly as it does on the water.
+    const rudderSide = -qr * S.rudderArea * rudCL * cosPhi * (u < 0 ? -1 : 1);
+    const rudderDrag = qr * S.rudderArea *
+      (0.010 + (rudCL * rudCL) / (Math.PI * S.rudderAR * 0.9) +
+       0.9 * Math.pow(Math.sin(Math.min(1.5, Math.abs(rudderAttack))), 3));
     hullV += rudderSide;
     hullU -= rudderDrag;
 
     /* --- waves: pitch, roll and surf --------------------------------------- */
     env.waves.sample(this.x, this.z, t, _wave);
-    const slopeAlong = _wave.dhdx * fx + _wave.dhdz * fz;      // + = climbing
-    const slopeAcross = _wave.dhdx * sx + _wave.dhdz * sz;
+    // Use the hull-scale slope: chop shorter than the boat passes underneath it.
+    const wx = _wave.hullX ?? _wave.dhdx, wz = _wave.hullZ ?? _wave.dhdz;
+    const slopeAlong = wx * fx + wz * fz;                      // + = climbing
+    const slopeAcross = wx * sx + wz * sz;
     const wavePitch = Math.atan(-slopeAlong);
     const waveRoll = Math.atan(slopeAcross);
     // Gravity along the wave face: this is what lets the boat surf downwind.
-    hullU += -S.mass * G * Math.sin(Math.atan(slopeAlong)) * 0.42;
+    hullU += -S.mass * G * Math.sin(Math.atan(slopeAlong)) * 0.30;
     // Orbital flow in the crest adds its own push and pull.
     env.waves.surfaceVelocity(this.x, this.z, t, _orb);
     hullU += (_orb.x * fx + _orb.z * fz) * 42;
@@ -226,12 +268,21 @@ export class Boat {
     let yaw = 0;
     yaw += rudderSide * S.rudderX;        // the blade works a long way aft
     yaw += keelLift * S.keelX;
-    // Weather helm: heel makes the immersed hull asymmetric and the bow seeks the wind.
-    yaw += side * Math.sin(Math.abs(this.phi)) * spd * spd * 118;
-    // Rig side force acts slightly aft of the centre of lateral resistance.
-    yaw += sailV * -0.16;
-    // Directional damping from the hull and appendages.
-    yaw += -this.r * (2300 + 900 * spd);
+    // Helm balance. A rig is stepped with its centre of effort forward of the hull's
+    // centre of lateral resistance, so upright the boat carries a touch of lee helm and
+    // bears away on its own from a standstill. Heel makes the immersed hull asymmetric,
+    // walks that balance point aft, and turns the lee helm into the weather helm you
+    // lean on going upwind. The second term is the effort swinging out with the boom,
+    // which loads the helm on a run and spins the bow off when the sail is backed.
+    // Heel counts with a sign: leaning to leeward gives weather helm, and a roll to
+    // windward makes the boat bear away — which is exactly how you steer a dinghy
+    // downwind with your body weight.
+    const leewardHeel = -this.phi * side;
+    const lead = CE_LEAD - HEEL_SHIFT * Math.sin(leewardHeel);
+    yaw += lead * sailV - Math.sin(beta) * CE_ARM * sailU;
+    // Directional damping from the hull and appendages. Kept light on purpose: a boat
+    // carries its rotation through a tack, and the helmsman has to stop the turn.
+    yaw += -this.r * (1200 + 900 * spd);
     this.r += (yaw / S.izz) * dt;
     this.psi += this.r * dt;
     if (this.psi > Math.PI) this.psi -= 2 * Math.PI;
@@ -239,7 +290,7 @@ export class Boat {
 
     /* --- heel -------------------------------------------------------------- */
     // The rig's side force acts well above the water, so it lays the boat over to leeward.
-    const heelMoment = sailV * S.heelArm * cosPhi;
+    const heelMoment = sailV * this.heelArmNow * cosPhi;
     // Righting arm: ballast plus form stability, which grows fast on a beamy hull.
     const sp = Math.sin(this.phi);
     const gz = sp * (S.gm + S.formGz * sp * sp);
@@ -271,8 +322,10 @@ export class Boat {
     while (twa > Math.PI) twa -= 2 * Math.PI;
     while (twa < -Math.PI) twa += 2 * Math.PI;
     tel.twa = twa;
-    tel.sailAngle = -side * boom;
-    tel.attack = attack; tel.luffing = luffing; tel.stalled = attack > 0.42 && a < 1.4;
+    tel.sailAngle = beta;
+    tel.attack = attack; tel.luffing = luffing;
+    tel.backed = backed && !luffing;
+    tel.stalled = attack > 0.42 && a < 1.4;
     tel.drive = sailU; tel.side = sailV;
     tel.heelDeg = this.phi * 180 / Math.PI;
     tel.speed = Math.hypot(this.u, this.v);
@@ -280,6 +333,15 @@ export class Boat {
     tel.leeway = leeway;
     tel.flow = flowSpeed;
 
+    if (this.debug) {
+      this.dbg = {
+        sailU, sailV, hullU, hullV, resist, keelLift, keelDrag, bluff,
+        rudderSide, rudderDrag, rudderAttack, bladeAngle, alpha, beta,
+        yawRudder: rudderSide * S.rudderX, yawKeel: keelLift * S.keelX,
+        lead, yawSail: lead * sailV - Math.sin(beta) * CE_ARM * sailU,
+        yawDamp: -this.r * (1200 + 900 * spd), leeway, u, v, r: this.r
+      };
+    }
     const work = Math.min(1, tel.speed / 4.6);
     this.wake += (work - this.wake) * Math.min(1, dt * 3);
     this.spray += (Math.min(1, Math.max(0, (tel.speed - 2.6) / 3.2) *
@@ -308,7 +370,7 @@ export class Boat {
     const spt = Math.sin(pt);
     const gz = spt * (S.gm + S.formGz * spt * spt);
     const hike = Math.min(1, pt * 3.8) * S.hikeMoment;
-    const sideBudget = (S.mass * G * gz + hike) / (S.heelArm * Math.cos(pt));
+    const sideBudget = (S.mass * G * gz + hike) / (this.heelArmNow * Math.cos(pt));
 
     const blanket = 1 - 0.50 * smoothstep(2.27, 3.0, a);
     const q = 0.5 * RHO_AIR * aws * aws * this.sailAreaNow * blanket *
@@ -319,15 +381,10 @@ export class Boat {
     let best = this.trim, bestScore = -Infinity, calmest = this.trim, calmestSide = Infinity;
     for (let i = 0; i <= 24; i++) {
       const trim = i / 24;
-      const boom = Math.min(a, 0.075 + trim * span);
-      let attack = a - boom, backed = false;
-      if (attack > Math.PI / 2) { attack = Math.PI - attack; backed = true; }
+      const attack = Math.abs(a - Math.min(a, 0.075 + trim * span));
       let cl, cd;
       if (attack < 0.035) { cl = 0; cd = 0.055; }
-      else {
-        cl = sailCL(attack); cd = sailCD(attack, cl, this.spinnaker ? 2.2 : 2.8);
-        if (backed) { cl = -cl * 0.35; cd *= 0.55; }
-      }
+      else { cl = sailCL(attack); cd = sailCD(attack, cl, this.spinnaker ? 2.2 : 2.8); }
       if (this.spinnaker && a < 1.25) { cl *= 0.55; cd *= 0.8; }
       const drive = q * (cl * Math.sin(a) - cd * Math.cos(a));
       const side = Math.abs(q * (cl * Math.cos(a) + cd * Math.sin(a)));
