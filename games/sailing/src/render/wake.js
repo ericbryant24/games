@@ -18,9 +18,17 @@ function foamTexture() {
     g.fillStyle = `rgba(255,255,255,${a})`;
     g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
   }
+  /* Force every pixel's colour to white and keep only the alpha. A cleared canvas
+     leaves transparent pixels black, and once the sampler interpolates between those
+     and the foam you get a grey fringe down the edge of the wake. */
+  const img = g.getImageData(0, 0, 128, 64);
+  for (let i = 0; i < img.data.length; i += 4) {
+    img.data[i] = 255; img.data[i + 1] = 255; img.data[i + 2] = 255;
+  }
+  g.putImageData(img, 0, 0);
+
   const t = new THREE.CanvasTexture(c);
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
-  t.premultiplyAlpha = false;
   return t;
 }
 
@@ -41,17 +49,25 @@ export class Wake {
   constructor(waves, opts = {}) {
     this.waves = waves;
     this.max = opts.samples ?? 72;
-    this.spacing = opts.spacing ?? 1.5;      // metres between ribbon ribs
+    this.spacing = opts.spacing ?? 1.1;      // metres between ribbon ribs
     this.life = opts.life ?? 13;             // seconds before a rib has faded out
     this.samples = [];
 
-    const verts = new Float32Array(this.max * 2 * 3);
-    const colors = new Float32Array(this.max * 2 * 4);
-    const uvs = new Float32Array(this.max * 2 * 2);
+    /* Four vertices across each rib rather than two, with the outer pair transparent.
+       A two-wide strip has a hard edge down each side, and at close range that reads as
+       a polygon lying on the water. */
+    this.across = [-1, -0.52, 0.52, 1];
+    this.acrossAlpha = [0, 1, 1, 0];
+    const W = this.across.length;
+    const verts = new Float32Array(this.max * W * 3);
+    const colors = new Float32Array(this.max * W * 4);
+    const uvs = new Float32Array(this.max * W * 2);
     const idx = [];
     for (let i = 0; i < this.max - 1; i++) {
-      const a = i * 2, b = a + 1, c = a + 2, d = a + 3;
-      idx.push(a, c, b, b, c, d);
+      for (let c = 0; c < W - 1; c++) {
+        const a = i * W + c, b = a + 1, d = (i + 1) * W + c, e = d + 1;
+        idx.push(a, d, b, b, d, e);
+      }
     }
     this.geometry = new THREE.BufferGeometry();
     this.geometry.setAttribute('position', new THREE.BufferAttribute(verts, 3));
@@ -60,6 +76,7 @@ export class Wake {
     this.geometry.setIndex(idx);
     this.geometry.setDrawRange(0, 0);
 
+    this.quadsPerRib = (this.across.length - 1) * 6;
     this.mesh = new THREE.Mesh(this.geometry, new THREE.MeshBasicMaterial({
       map: foamTexture(), transparent: true, vertexColors: true,
       depthWrite: false, blending: THREE.NormalBlending, side: THREE.DoubleSide
@@ -117,24 +134,26 @@ export class Wake {
       // Foam spreads and thins as it drifts astern.
       const spread = s.w * (1 + age * 1.9);
       const fade = (1 - age) * (1 - age) * s.a;
-      for (const sign of [-1, 1]) {
-        const px = s.x + s.sx * spread * sign;
-        const pz = s.z + s.sz * spread * sign;
+      for (let c = 0; c < this.across.length; c++) {
+        const off = this.across[c] * spread;
+        const px = s.x + s.sx * off;
+        const pz = s.z + s.sz * off;
         this.waves.sample(px, pz, time, this._wave);
         pos[k * 3] = px;
         pos[k * 3 + 1] = this._wave.y + 0.035;
         pos[k * 3 + 2] = pz;
         col[k * 4] = 1; col[k * 4 + 1] = 1; col[k * 4 + 2] = 1;
-        col[k * 4 + 3] = fade;
+        col[k * 4 + 3] = fade * this.acrossAlpha[c];
         uv[k * 2] = i * 0.5;
-        uv[k * 2 + 1] = sign > 0 ? 1 : 0;
+        uv[k * 2 + 1] = c / (this.across.length - 1);
         k++;
       }
     }
     this.geometry.attributes.position.needsUpdate = true;
     this.geometry.attributes.color.needsUpdate = true;
     this.geometry.attributes.uv.needsUpdate = true;
-    this.geometry.setDrawRange(0, Math.max(0, (k / 2 - 1) * 6));
+    const ribs = k / this.across.length;
+    this.geometry.setDrawRange(0, Math.max(0, (ribs - 1) * this.quadsPerRib));
 
     /* Spray off the bow, when the boat is pressing into it. */
     const sp = this.spray;

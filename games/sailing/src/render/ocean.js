@@ -78,6 +78,9 @@ uniform float uTime;
 uniform float uFoam;          // how readily the sea breaks, from the wind strength
 uniform float uFade;
 uniform vec3 uWindDir;
+uniform sampler2D uGust;      // the wind field around the boat, as pressure 0..1
+uniform vec2 uGustOrigin;
+uniform float uGustSize;
 uniform vec4 uShadows[${MAX_SHADOWS}];   // x, z, heading, how hard she is going
 varying vec3 vWorld;
 varying vec3 vNormal;
@@ -85,6 +88,13 @@ varying float vCrest;
 varying float vDist;
 
 void main() {
+  /* Pressure on the water. Reading the surface for the dark patches where a gust is
+     coming through is a real skill, so the shader is fed the same wind field the sails
+     are working in — what you can see is what you will get. */
+  vec2 gp = (vWorld.xz - uGustOrigin) / uGustSize + 0.5;
+  float gust = texture2D(uGust, clamp(gp, 0.001, 0.999)).r;
+  float pressure = clamp((gust - 0.42) * 2.3, -0.6, 1.0);
+
   vec3 view = uCamera - vWorld;
   float dist = length(view);
   view /= dist;
@@ -95,8 +105,12 @@ void main() {
   if (rippleFade > 0.001) {
     vec2 rp = vWorld.xz * 1.05 + uWindDir.xz * uTime * 0.75;
     float n1 = vnoise(rp) - 0.5;
-    float n2 = vnoise(rp * 2.7 + 31.0) - 0.5;
-    nrm = normalize(nrm + vec3(n1 * 0.9 + n2 * 0.45, 0.0, n2 * 0.9 - n1 * 0.4) * rippleFade * 0.30);
+    // The second, finer octave is only worth paying for within a few boat lengths.
+    float fine = 1.0 - smoothstep(12.0, 70.0, dist);
+    float n2 = fine > 0.001 ? (vnoise(rp * 2.7 + 31.0) - 0.5) * fine : 0.0;
+    // A gust roughens the surface it crosses, which is what makes it visible.
+    float rough = 0.30 * (1.0 + 0.85 * pressure);
+    nrm = normalize(nrm + vec3(n1 * 0.9 + n2 * 0.45, 0.0, n2 * 0.9 - n1 * 0.4) * rippleFade * rough);
   }
 
   // Held below 1 on purpose: physically the sea goes mirror-flat at a grazing angle,
@@ -114,7 +128,8 @@ void main() {
   float through = pow(max(dot(normalize(vec3(uSunDir.x, -uSunDir.y, uSunDir.z)), -view), 0.0), 3.0);
   body += uShallow * through * 0.22 * lift;
 
-  vec3 col = mix(body, sky, fres);
+  // Ruffled water scatters less sky back at you, so pressure reads as a dark patch.
+  vec3 col = mix(body, sky, fres * (1.0 - 0.42 * max(pressure, 0.0)));
 
   // Sun on the water: a tight highlight near to, breaking up into glitter further off.
   vec3 halfVec = normalize(view + uSunDir);
@@ -124,11 +139,13 @@ void main() {
                       smoothstep(30.0, 200.0, dist));
   col += uSunTint * spec * 2.1 * glitter;
 
-  // Whitecaps where the wave field is pinching the surface together.
-  float breakUp = 0.55 + 0.9 * fbm(vWorld.xz * 0.42 + uWindDir.xz * uTime * 0.35);
-  float foam = smoothstep(0.30, 0.92, vCrest * uFoam * breakUp);
-  foam *= 1.0 - smoothstep(uFade * 0.35, uFade * 0.9, vDist);
-  col = mix(col, vec3(0.90, 0.94, 0.97), clamp(foam, 0.0, 0.85));
+  // Whitecaps, only where the wave field is really pinching the surface together, and
+  // broken up so they read as water tumbling rather than as patches of paint.
+  float breakUp = 0.40 + 1.15 * fbm(vWorld.xz * 0.62 + uWindDir.xz * uTime * 0.35);
+  float foam = smoothstep(0.62, 1.25, vCrest * uFoam * breakUp * (1.0 + 0.30 * pressure));
+  foam *= 0.35 + 0.65 * vnoise(vWorld.xz * 2.4 + uWindDir.xz * uTime * 0.9);
+  foam *= 1.0 - smoothstep(uFade * 0.30, uFade * 0.8, vDist);
+  col = mix(col, vec3(0.90, 0.94, 0.97), clamp(foam, 0.0, 0.72));
 
   /* Each hull gets a shadow under it, a collar of white water along the waterline and
      a bow wave running aft in a V. Without these a boat looks laid on the sea rather
@@ -154,14 +171,17 @@ void main() {
       float band = abs(abs(loc.x) - arm);
       bow = smoothstep(1.1, 0.12, band) * (1.0 - aft / 20.0) * go * 0.42;
     }
-    float ripple = 0.70 + 0.55 * vnoise(loc * 2.2 + uTime * 1.4);
-    col = mix(col, vec3(0.93, 0.96, 0.98), clamp((foamHull + bow) * ripple, 0.0, 0.62));
+    float foam = foamHull + bow;
+    if (foam > 0.002) {
+      foam *= 0.70 + 0.55 * vnoise(loc * 2.2 + uTime * 1.4);
+      col = mix(col, vec3(0.93, 0.96, 0.98), clamp(foam, 0.0, 0.62));
+    }
   }
 
   // Fog the sea into the sky so the horizon is a join, not an edge.
   vec3 hazeDir = normalize(vec3(vWorld.x - uCamera.x, 0.6, vWorld.z - uCamera.z));
   float fog = smoothstep(uFade * 0.42, uFade * 0.98, vDist);
-  col = mix(col, skyColor(hazeDir, 0.55), fog);
+  col = mix(col, skyColor(hazeDir, 0.0), fog);
 
   gl_FragColor = vec4(present(col), 1.0);
 }
@@ -192,6 +212,9 @@ export class Ocean {
       uFoam: { value: 1.0 },
       uFade: { value: this.fade },
       uWindDir: { value: new THREE.Vector3(0, 0, 1) },
+      uGust: { value: null },
+      uGustOrigin: { value: new THREE.Vector2() },
+      uGustSize: { value: 900 },
       uShadows: { value: Array.from({ length: MAX_SHADOWS }, () => new THREE.Vector4()) }
     };
 

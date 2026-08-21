@@ -98,7 +98,7 @@ const MAT = {
     emissive: 0xaebac8, emissiveIntensity: 0.80
   }),
   kite: (color) => new THREE.MeshStandardMaterial({
-    color, roughness: 0.70, side: THREE.DoubleSide, emissive: 0xc08d42, emissiveIntensity: 0.55
+    color, roughness: 0.70, side: THREE.DoubleSide, emissive: 0xd9a45a, emissiveIntensity: 0.85
   })
 };
 

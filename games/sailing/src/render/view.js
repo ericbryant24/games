@@ -8,6 +8,7 @@ import { Sky, WEATHER, applyWeather } from './sky.js';
 import { BoatMesh } from './boatmesh.js';
 import { Wake } from './wake.js';
 import { CourseView } from './marks.js';
+import { GustMap } from './gustmap.js';
 
 const HULL_COLORS = [0xf2f4f6, 0x1d3b56, 0xbc3b2a, 0x2f6b4f, 0xe4dcc6, 0x3a3f46];
 const KITE_COLORS = [0xffbe52, 0xff5f7e, 0x54c2f0, 0x8be36a, 0xffe066, 0xb08cff];
@@ -42,6 +43,10 @@ export class View {
     this.sky = new Sky();
     this.ocean = new Ocean(sim.waves, { rings: q.rings, segments: q.segments, radius: q.radius });
     this.ocean.syncWaves();
+    // The water shows where the pressure is, from the same field the sails feel.
+    this.gusts = new GustMap(sim.wind, 900);
+    this.ocean.uniforms.uGust.value = this.gusts.texture;
+    this.ocean.uniforms.uGustSize.value = this.gusts.size;
     this.scene.add(this.sky.mesh, this.ocean.mesh);
 
     this.courseView = new CourseView(sim.course, sim.waves);
@@ -95,6 +100,7 @@ export class View {
     const b = this.sim.player;
     const fx = Math.sin(b.psi), fz = Math.cos(b.psi);
     this.camPos.set(b.x - fx * 15, b.y + 5.3, b.z - fz * 15);
+    this.gusts.update(0, b.x, b.z, true);
     for (const e of this.boats) e.wake.reset();
   }
 
@@ -104,7 +110,7 @@ export class View {
 
     this.sky.uniforms.uCloudDrift.value = time * 0.0035;
     this.ocean.uniforms.uCloudDrift.value = this.sky.uniforms.uCloudDrift.value;
-    this.ocean.uniforms.uFoam.value = 0.5 + Math.min(1.6, sim.wind.baseSpeed * 0.16);
+    this.ocean.uniforms.uFoam.value = 0.35 + Math.min(1.5, sim.wind.baseSpeed * 0.145);
     const wf = sim.wind.baseFrom;
     this.ocean.uniforms.uWindDir.value.set(-Math.sin(wf), 0, -Math.cos(wf));
 
@@ -155,6 +161,8 @@ export class View {
     this.camera.fov = (this.camera.aspect < 1 ? 60 : 50) + Math.min(5, spd * 0.8);
     this.camera.updateProjectionMatrix();
 
+    this.gusts.update(dt, player.x, player.z);
+    this.ocean.uniforms.uGustOrigin.value.copy(this.gusts.origin);
     this.ocean.update(time, this.camera, this.shadows);
   }
 
