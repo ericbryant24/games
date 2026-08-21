@@ -8,7 +8,14 @@ export const MAX_WAVES = 8;
    scaled for the sort of inshore water a race is sailed on: about 0.8 m in 14 knots,
    1.5 m in 19. */
 export function significantHeight(windSpeed) {
-  return Math.min(2.6, 0.0155 * windSpeed * windSpeed);
+  return Math.min(2.4, 0.0175 * windSpeed * windSpeed);
+}
+
+/* Wavelength of the dominant wind wave. Race courses are inshore and fetch-limited, so
+   the sea is short and steep rather than the long swell of an open ocean — which is
+   also what makes the water look like water. */
+export function peakWavelength(windSpeed) {
+  return Math.max(4.5, Math.min(32, 0.17 * windSpeed * windSpeed + 3));
 }
 
 /* How much of a wave a hull of length L actually feels as pitch, roll and surge.
@@ -31,24 +38,25 @@ export class WaveField {
      direction, plus a long swell running in from a slightly different quarter. */
   configure(windDir, windSpeed, swellDir = windDir - 0.5, swellHeight = 0.45) {
     const hs = significantHeight(windSpeed);
+    const peak = peakWavelength(windSpeed);
     const waves = [];
 
-    // Wind sea: five components, short to medium, fanned around the wind vector.
+    // Wind sea: five components fanned around the wind, from a little longer than the
+    // dominant wave down to the chop that gives the surface its texture.
     const bands = [
-      { lambda: 42, w: 0.44, spread: 0.10 },
-      { lambda: 26, w: 0.30, spread: -0.34 },
-      { lambda: 15, w: 0.16, spread: 0.46 },
-      { lambda: 8.5, w: 0.07, spread: -0.66 },
-      { lambda: 4.6, w: 0.03, spread: 0.85 }
+      { scale: 2.10, w: 0.21, spread: 0.09 },
+      { scale: 1.00, w: 0.34, spread: -0.31 },
+      { scale: 0.54, w: 0.24, spread: 0.44 },
+      { scale: 0.30, w: 0.14, spread: -0.64 },
+      { scale: 0.17, w: 0.07, spread: 0.86 }
     ];
     for (let i = 0; i < bands.length; i++) {
       const b = bands[i];
-      const dir = windDir + b.spread;
-      waves.push(this._mk(dir, b.lambda, hs * 0.5 * b.w * 2.0, 0.62, i * 1.7));
+      waves.push(this._mk(windDir + b.spread, peak * b.scale, hs * 0.5 * b.w, 0.62, i * 1.7));
     }
-    // Swell: long, low, smooth, from its own direction.
-    waves.push(this._mk(swellDir, 110, swellHeight * 0.5, 0.30, 0.9));
-    waves.push(this._mk(swellDir + 0.22, 78, swellHeight * 0.34, 0.30, 2.3));
+    // Swell: long, low and smooth, running in from its own quarter.
+    waves.push(this._mk(swellDir, 120, swellHeight * 0.5, 0.28, 0.9));
+    waves.push(this._mk(swellDir + 0.22, 84, swellHeight * 0.32, 0.28, 2.3));
 
     this.waves = waves;
     this.count = Math.min(waves.length, MAX_WAVES);

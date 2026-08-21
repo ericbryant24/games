@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#04121f">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Windward — sailing racing simulator</title>
+<meta name="description" content="A keelboat racing simulator with real sail aerodynamics, apparent wind, gusts and a windward-leeward course. Steer with one thumb, trim with the other.">
+<link rel="icon" href="../../assets/favicon.svg">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <canvas id="scene"></canvas>
+  <canvas id="hud"></canvas>
+
+  <div id="pads">
+    <div id="helm" class="pad pad-left" aria-label="Helm: drag left or right to steer"></div>
+    <div id="sheet" class="pad pad-right" aria-label="Sheet: drag up to trim in, down to ease"></div>
+  </div>
+
+  <button id="menuBtn" class="chip" hidden>Menu</button>
+
+  <!-- Start screen ------------------------------------------------------- -->
+  <section id="start" class="screen">
+    <div class="sheetbox">
+      <h1>Windward</h1>
+      <p class="sub">Keelboat racing, simulated properly. Apparent wind, sail aerodynamics,
+        gusts, shifts and dirty air. One lap of a windward&ndash;leeward course against four rivals.</p>
+
+      <div class="field">
+        <label>Breeze</label>
+        <div class="seg" data-opt="wind">
+          <button data-v="4">Light<em>8 kn</em></button>
+          <button data-v="7" class="on">Medium<em>14 kn</em></button>
+          <button data-v="10">Fresh<em>19 kn</em></button>
+          <button data-v="13">Heavy<em>25 kn</em></button>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Conditions</label>
+        <div class="seg" data-opt="weather">
+          <button data-v="bright" class="on">Bright</button>
+          <button data-v="hazy">Hazy</button>
+          <button data-v="overcast">Overcast</button>
+          <button data-v="evening">Evening</button>
+        </div>
+      </div>
+
+      <div class="field two">
+        <div>
+          <label>Course</label>
+          <div class="seg" data-opt="laps">
+            <button data-v="1" class="on">1 lap</button>
+            <button data-v="2">2 laps</button>
+          </div>
+        </div>
+        <div>
+          <label>Fleet</label>
+          <div class="seg" data-opt="difficulty">
+            <button data-v="0.72">Club</button>
+            <button data-v="0.88" class="on">Keen</button>
+            <button data-v="1">Sharp</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Graphics</label>
+        <div class="seg" data-opt="quality">
+          <button data-v="low">Low</button>
+          <button data-v="medium" class="on">Medium</button>
+          <button data-v="high">High</button>
+        </div>
+      </div>
+
+      <button id="go" class="primary">Start race</button>
+      <details class="help">
+        <summary>How to sail it</summary>
+        <ul>
+          <li><b>Left thumb</b> is the tiller. Drag across to steer; let go and it centres.</li>
+          <li><b>Right thumb</b> is the mainsheet. Drag up to trim in, down to ease out. It stays where you put it.</li>
+          <li>You cannot sail straight at the wind. The red wedge on the dial is the no-go zone &mdash;
+            zig-zag through it, and the green marks are the angles that pay.</li>
+          <li>Watch the telltale by your right thumb. <b>Luffing</b> means trim in. <b>Stalled</b> means ease out.</li>
+          <li>Coming out of a tack, bear away a few degrees to build speed before you point up again.</li>
+          <li>Keyboard: arrows or WASD.</li>
+        </ul>
+      </details>
+      <p class="foot"><a href="../../">More games</a></p>
+    </div>
+  </section>
+
+  <!-- Results ------------------------------------------------------------ -->
+  <section id="results" class="screen hidden">
+    <div class="sheetbox">
+      <h2 id="resultTitle">Finished</h2>
+      <ol id="resultList" class="results"></ol>
+      <button id="again" class="primary">Race again</button>
+      <button id="backToMenu" class="ghost">Change conditions</button>
+    </div>
+  </section>
+
+  <!-- Paused ------------------------------------------------------------- -->
+  <section id="paused" class="screen hidden">
+    <div class="sheetbox narrow">
+      <h2>Paused</h2>
+      <button id="resume" class="primary">Resume</button>
+      <button id="quit" class="ghost">Abandon race</button>
+    </div>
+  </section>
+
+  <div id="loading" class="screen hidden"><div class="spinner"></div></div>
+</div>
+<script type="module" src="src/main.js"></script>
+</body>
+</html>
