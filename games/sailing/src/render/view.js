@@ -10,7 +10,7 @@ import { Wake } from './wake.js';
 import { CourseView } from './marks.js';
 
 const HULL_COLORS = [0xf2f4f6, 0x1d3b56, 0xbc3b2a, 0x2f6b4f, 0xe4dcc6, 0x3a3f46];
-const KITE_COLORS = [0xffb03a, 0xff5f7e, 0x54c2f0, 0x8be36a, 0xffe066, 0xb08cff];
+const KITE_COLORS = [0xffbe52, 0xff5f7e, 0x54c2f0, 0x8be36a, 0xffe066, 0xb08cff];
 
 export const QUALITY = {
   low:    { rings: 62,  segments: 72,  pixel: 1.0,  detail: 0.4, radius: 1100, spray: 90,  wake: 44 },

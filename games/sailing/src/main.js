@@ -13,7 +13,8 @@ const scene = el('scene');
 const hudCanvas = el('hud');
 
 const SETTINGS_KEY = 'windward.settings.v1';
-const defaults = { wind: 7, weather: 'bright', laps: 1, difficulty: 0.88, quality: 'medium' };
+const defaults = { wind: 7, weather: 'bright', laps: 1, difficulty: 0.88,
+  quality: 'medium', assist: 0 };
 
 let settings = load();
 let sim = null, view = null, hud = null, controls = null;
@@ -72,6 +73,7 @@ function startRace() {
     controls = new Controls({ trim: 0.42 });
     controls.attach(el('helm'), el('sheet'));
     sim.player.trim = controls.trim;
+    sim.player.autoTrim = Number(settings.assist) === 1;
 
     sim.race.onEvent = onRaceEvent;
     view.jumpToBoat();
@@ -119,7 +121,10 @@ function frame(now) {
 
   controls.update(dt);
   sim.player.rudder = controls.rudder * sim.player.spec.maxRudder;
-  sim.player.trim = controls.trim;
+  // With the assist on, the boat trims itself and the gauge follows the sheet rather
+  // than the other way round.
+  if (sim.player.autoTrim) controls.trim = sim.player.trim;
+  else sim.player.trim = controls.trim;
 
   sim.step(dt);
   view.update(dt, sim.time);

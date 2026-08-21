@@ -46,7 +46,7 @@ export class Hud {
     this.layout = {
       portrait,
       ribbon: { x: 14, y: safeTop, w: w - 28, h: 30 },
-      dial: { cx: w / 2, cy: safeTop + 52 + (portrait ? 50 : 42), r: portrait ? 50 : 42 },
+      dial: { cx: w / 2, cy: safeTop + 52 + (portrait ? 50 : 34), r: portrait ? 50 : 34 },
       padH: portrait ? Math.min(150, w * 0.40) : Math.min(160, w * 0.22)
     };
   }
@@ -70,6 +70,12 @@ export class Hud {
     scrim.addColorStop(1, 'rgba(4,16,28,0)');
     g.fillStyle = scrim;
     g.fillRect(0, 0, this.w, L.dial.cy + L.dial.r + 60);
+    // And a little under the thumb gauges, which sit over open water.
+    const foot = g.createLinearGradient(0, this.h - L.padH - 40, 0, this.h);
+    foot.addColorStop(0, 'rgba(4,16,28,0)');
+    foot.addColorStop(1, 'rgba(4,16,28,0.40)');
+    g.fillStyle = foot;
+    g.fillRect(0, this.h - L.padH - 40, this.w, L.padH + 40);
 
     const boat = sim.player;
     const tel = boat.tel;
@@ -214,16 +220,17 @@ export class Hud {
 
     // Readouts either side of the dial.
     // Readouts under the dial, clear of the speed and race blocks either side.
+    const gap = this.layout.portrait ? 32 : 62;
     g.textAlign = 'center';
     g.fillStyle = DIM;
     g.font = `600 9.5px ${FONT}`;
-    g.fillText('TWA', d.cx - 32, d.cy + d.r + 12);
-    g.fillText('WIND', d.cx + 32, d.cy + d.r + 12);
+    g.fillText('TWA', d.cx - gap, d.cy + d.r + 12);
+    g.fillText('WIND', d.cx + gap, d.cy + d.r + 12);
     g.fillStyle = INK;
     g.font = `700 13px ${FONT}`;
     g.fillText(`${Math.round(Math.abs(tel.twa * DEG))}°${tel.twa >= 0 ? 'S' : 'P'}`,
-      d.cx - 32, d.cy + d.r + 26);
-    g.fillText(`${(tel.tws * KTS).toFixed(0)} kn`, d.cx + 32, d.cy + d.r + 26);
+      d.cx - gap, d.cy + d.r + 26);
+    g.fillText(`${(tel.tws * KTS).toFixed(0)} kn`, d.cx + gap, d.cy + d.r + 26);
   }
 
   windArrow(g, twa, r, color, width, tag) {
@@ -392,9 +399,9 @@ export class Hud {
     g.fill();
 
     g.textAlign = 'center';
-    g.fillStyle = DIM;
+    g.fillStyle = boat.autoTrim ? GREEN : DIM;
     g.font = `600 10px ${FONT}`;
-    g.fillText('SHEET', x + w / 2, top - 10);
+    g.fillText(boat.autoTrim ? 'SHEET · AUTO' : 'SHEET', x + w / 2, top - 10);
     g.fillText('IN', x + w / 2 + 26, top + 6);
     g.fillText('OUT', x + w / 2 + 26, top + h - 6);
 

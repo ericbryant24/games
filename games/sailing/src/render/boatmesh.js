@@ -98,7 +98,7 @@ const MAT = {
     emissive: 0xaebac8, emissiveIntensity: 0.80
   }),
   kite: (color) => new THREE.MeshStandardMaterial({
-    color, roughness: 0.66, side: THREE.DoubleSide, emissive: 0x554122, emissiveIntensity: 0.50
+    color, roughness: 0.70, side: THREE.DoubleSide, emissive: 0xc08d42, emissiveIntensity: 0.55
   })
 };
 
@@ -360,8 +360,10 @@ export class BoatMesh {
       return [px, base.y + 1.05 + uu * (luffLen - 1.05), pz];
     });
 
-    /* Headsail: luff on the forestay, sheeted harder than the main. */
+    /* Headsail: luff up the forestay, which rakes aft to the masthead, and sheeted
+       harder than the main. */
     const stayTop = base.y + this.mastHeight * 0.94;
+    const stayTopZ = base.z - 0.32;
     const bowZ = (0.5 - 0.015) * this.spec.loa;
     const deckY = this.hull.sheer(0.02);
     const jibBeta = beta * 0.52;
@@ -369,7 +371,7 @@ export class BoatMesh {
     this.jib.shape((u, w) => {
       const c = jibFoot * (1 - 0.86 * Math.pow(u, 1.25));
       const twist = jibBeta * (1 + 0.5 * u);
-      const lx = 0, ly = deckY + u * (stayTop - deckY), lz = bowZ - u * 0.30;
+      const lx = 0, ly = deckY + u * (stayTop - deckY), lz = bowZ + u * (stayTopZ - bowZ);
       const cam = (0.10 * c) * (0.28 + 0.72 * load) * (1 - 0.6 * luff);
       const bulge = Math.pow(Math.sin(Math.PI * Math.pow(w, 0.88)), 0.85);
       const flap = shake * 0.34 * c * w * Math.sin(w * 8.0 + time * 19.0 + u * 5.0);
