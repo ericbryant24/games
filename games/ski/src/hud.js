@@ -137,14 +137,13 @@ export class Hud {
       if (this.pop.t <= 0) this.pop = null;
     }
 
-    // The thumb.
-    const t = controls.touch;
-    if (t) {
-      g.strokeStyle = 'rgba(19,35,58,0.25)'; g.lineWidth = 2;
-      g.beginPath(); g.arc(t.x0, t.y0, 34, 0, Math.PI * 2); g.stroke();
-      g.fillStyle = 'rgba(255,255,255,0.55)';
-      const dx = Math.max(-40, Math.min(40, t.x - t.x0)), dy = Math.max(-40, Math.min(40, t.y - t.y0));
-      g.beginPath(); g.arc(t.x0 + dx, t.y0 + dy, 16, 0, Math.PI * 2); g.fill();
+    // The poles: a ring where each thumb landed, a dot where it is now.
+    for (const t of controls.poles) {
+      g.strokeStyle = 'rgba(19,35,58,0.22)'; g.lineWidth = 2;
+      g.beginPath(); g.arc(t.x0, t.y0, 30, 0, Math.PI * 2); g.stroke();
+      g.fillStyle = 'rgba(255,255,255,0.6)';
+      const dx = Math.max(-36, Math.min(36, t.x - t.x0)), dy = Math.max(-36, Math.min(36, t.y - t.y0));
+      g.beginPath(); g.arc(t.x0 + dx, t.y0 + dy, 14, 0, Math.PI * 2); g.fill();
     }
   }
 

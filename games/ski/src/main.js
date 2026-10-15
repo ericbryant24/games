@@ -115,6 +115,8 @@ function showRoster() {
       <div class="bars">${TRAITS.map(t => `<span class="bar ${a[t] === lo ? 'weak' : a[t] === hi ? 'strong' : ''}">
         ${TRAIT_LABEL[t]}<i><b style="width:${Math.round(a[t] * 100)}%"></b></i></span>`).join('')}</div></li>`;
   }).join('');
+  el('rosterList').insertAdjacentHTML('beforeend',
+    '<li class="hint"><b>Hold left or right</b> to turn · <b>hold both</b> to crouch, <b>let go</b> to jump</li>');
   el('roster').classList.toggle('low', settings.camera === 'reverse');
   el('roster').classList.remove('hidden');
 }
@@ -143,23 +145,33 @@ function frame(now) {
    over a bump does not throw you into an accidental spin. */
 function drive(dt) {
   const p = sim.player;
-  if (controls.jump) { p.wantJump = sim.phase !== 'countdown'; controls.jump = false; }
+  // A crouch let go on the snow is a jump; one let go in the air is just letting go.
+  if (controls.jump) { p.wantJump = sim.phase !== 'countdown' && !p.air; controls.jump = false; }
+  const pushes = controls.skate;
+  controls.skate = 0;
   if (p.crashed) return;
   // In the reverse view you ski towards the camera, so the screen's right is your left.
   const flip = settings.camera === 'reverse' ? -1 : 1;
   if (!p.air) {
     air = null;
     p.steer = controls.steer * flip;
-    p.tuck = controls.vert > 0.35;
-    p.brake = controls.vert < -0.35 ? Math.min(1, -controls.vert * 1.2) : 0;
+    p.tuck = controls.crouch;
+    p.brake = controls.brake;
     p.flipIn = 0;
+    // Alternate taps skate you along — a push each, worth less the faster you go.
+    if (pushes && sim.phase === 'run' && p.speed < 12) {
+      const k = pushes * 1.4 * (1 - p.speed / 12);
+      p.vx += Math.sin(p.psi) * k; p.vz += Math.cos(p.psi) * k;
+    }
     return;
   }
+  // In the air a pole held from before take-off does nothing until you press again,
+  // so carving over a lip does not throw you into a spin you never asked for.
   if (!air) air = { steer: controls.steer, vert: controls.vert, spin: Math.abs(controls.steer) < 0.3, flip: Math.abs(controls.vert) < 0.3 };
   if (!air.spin && Math.abs(controls.steer - air.steer) > 0.5) air.spin = true;
   if (!air.flip && Math.abs(controls.vert - air.vert) > 0.5) air.flip = true;
-  const live = p.airTime > 0.1;
-  p.steer = air.spin && live && Math.abs(controls.steer) > 0.2 ? controls.steer * flip : 0;
+  const live = p.airTime > 0.08;
+  p.steer = air.spin && live && Math.abs(controls.steer) > 0.2 ? Math.max(-1, Math.min(1, controls.steer)) * flip : 0;
   p.flipIn = air.flip && live && Math.abs(controls.vert) > 0.2 ? controls.vert : 0;
   p.tuck = false; p.brake = 0;
 }

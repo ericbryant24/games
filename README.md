@@ -72,9 +72,10 @@ and you win; the score is how long it took. Crash yourself and they win.
   lens, so the faces of drops and jumps are in view and the chasers are above you on
   screen. A behind-you camera is in the menu.
 
-Controls: drag anywhere to carve, drag down to tuck, up to brake, tap (or tap a second
-finger) to jump. In the air the same drags spin and flip you. Keyboard: arrows/WASD
-and space.
+Controls are Grand Mountain Adventure's two ski poles: hold the left or right half of
+the screen to turn (slide outward for a sharp turn), hold both to crouch and let go to
+jump, tap left-right-left to skate, drag down to brake. In the air, hold a side to spin
+and drag both up or down to flip. Keyboard: arrows, down to crouch, space to jump.
 
 ## Layout
 
