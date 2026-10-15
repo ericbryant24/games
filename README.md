@@ -130,15 +130,18 @@ Jekyll from touching anything.
 
 ## Updates and caching
 
-Every page includes `assets/update.js`, which registers the service worker in `sw.js`
-and watches for new releases. There is nothing to bump when you publish:
+Every page includes `assets/update.js`. There is nothing to bump when you publish:
 
-- `sw.js` is network-first and revalidates every request with the server, so a reload
-  always gets the latest files rather than whatever the browser cached. It keeps a copy
-  of everything it fetches, so a game you have played once still loads offline.
-- `update.js` notes the ETag of every file the page loaded, re-checks them every five
-  minutes while the page is in view (and when you come back to it), and if any has
-  changed shows a small "A new version is ready — Reload" prompt.
+- A few seconds after load, then every five minutes while the page is in view (and when
+  you come back to it), it compares the ETag of each file the page uses as this browser
+  has it cached against the server's. If any differ it shows a small "A new version is
+  ready — Reload" prompt.
+- Reload first re-fetches each of those files with `cache: 'reload'`, which replaces the
+  stale copies in the browser's cache, then reloads the page onto them.
+
+There is deliberately no service worker: an earlier one stopped Safari loading the
+games' modules. `sw.js` now only uninstalls itself from browsers that still have it —
+keep it until no one is likely to.
 
 A new page needs `<script src="…/assets/update.js" defer></script>` before `</body>`.
 

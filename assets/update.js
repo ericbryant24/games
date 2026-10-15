@@ -1,28 +1,27 @@
-/* Keeps every page of the arcade up to date.
+/* Keeps every page of the arcade up to date, with no service worker and no version
+   number to bump.
 
-   1. Registers the service worker (sw.js at the site root), which revalidates every
-      file with the server so a reload always gets the latest release.
-   2. Notes the ETag (or Last-Modified date) of every file this page loaded, then
-      checks them again every few minutes while the page is in view, and whenever you
-      come back to it. If any has changed on the server, a small prompt offers to reload
-      into the new version.
+   A few seconds after load, and then every few minutes while the page is in view (and
+   whenever you come back to it), it compares two versions of every file the page uses
+   from this site: the copy this browser has (its ETag or Last-Modified date, read
+   straight from the HTTP cache) and the one on the server now. If any differ, a small
+   prompt offers to reload. Reloading first re-downloads each of those files into the
+   cache, so nothing stale survives the reload.
 
    Include it with a plain deferred script tag on every page:
      <script src="assets/update.js" defer></script>   (adjust the path) */
 
 (() => {
-  const me = document.currentScript;
-  if (!me) return;
-  const root = new URL('../', me.src);            // this file lives in <root>/assets/
   const EVERY = 5 * 60 * 1000;
-
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register(new URL('sw.js', root), { updateViaCache: 'none' })
-      .catch(() => { /* file:// or a locked-down browser: carry on without */ });
-  }
-
-  const baseline = new Map();
   let lastCheck = 0, shown = false, busy = false;
+
+  // An earlier version of the arcade installed a service worker that could break
+  // Safari. Make sure none is left behind.
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.getRegistrations()
+      .then(rs => rs.forEach(r => r.unregister()))
+      .catch(() => {});
+  }
 
   /* The page itself plus every script, stylesheet and page it pulled from this site. */
   function watched() {
@@ -36,20 +35,21 @@
     return [...out];
   }
 
-  /* What the server says this file's version is right now. */
-  async function token(url) {
+  function stamp(r) {
+    return r && r.ok ? (r.headers.get('etag') || r.headers.get('last-modified')) : null;
+  }
+
+  /* Is the copy this browser holds of `url` the same as the server's? */
+  async function same(url) {
     try {
-      const r = await fetch(url, { method: 'HEAD', cache: 'no-store' });
-      if (!r.ok) return null;
-      const t = r.headers.get('etag') || r.headers.get('last-modified');
-      if (t) return t;
-      // No validators at all: fall back to hashing the body.
-      const g = await fetch(url, { cache: 'no-store' });
-      const buf = await g.arrayBuffer();
-      const d = await crypto.subtle.digest('SHA-1', buf);
-      return Array.from(new Uint8Array(d), b => b.toString(16).padStart(2, '0')).join('');
+      const [mine, theirs] = await Promise.all([
+        fetch(url, { cache: 'force-cache' }),                  // what we have
+        fetch(url, { method: 'HEAD', cache: 'no-store' })      // what is out there
+      ]);
+      const a = stamp(mine), b = stamp(theirs);
+      return !a || !b || a === b;                              // unknown counts as same
     } catch {
-      return null;                                 // offline, or the file went away
+      return true;                                             // offline: nothing to say
     }
   }
 
@@ -60,10 +60,7 @@
     let changed = false;
     try {
       for (const url of watched()) {
-        const t = await token(url);
-        if (t === null) continue;
-        if (!baseline.has(url)) { baseline.set(url, t); continue; }
-        if (baseline.get(url) !== t) { changed = true; break; }
+        if (!(await same(url))) { changed = true; break; }
       }
     } finally { busy = false; }
     if (changed) prompt();
@@ -90,7 +87,10 @@
     bar.innerHTML = '<span>A new version is ready</span>' +
       '<button class="go" type="button">Reload</button>' +
       '<button class="no" type="button" aria-label="Not now">×</button>';
-    bar.querySelector('.go').addEventListener('click', reload);
+    bar.querySelector('.go').addEventListener('click', () => {
+      bar.querySelector('span').textContent = 'Updating…';
+      refresh();
+    });
     bar.querySelector('.no').addEventListener('click', () => bar.remove());
     // Keep taps on the prompt from reaching a game underneath it.
     for (const ev of ['pointerdown', 'touchstart', 'mousedown']) bar.addEventListener(ev, e => e.stopPropagation());
@@ -98,19 +98,19 @@
     document.body.appendChild(bar);
   }
 
-  async function reload() {
-    // Drop the offline copies too, so nothing old can be served even if the network
-    // hiccups during the reload. The service worker refills them as files arrive.
-    try { for (const k of await caches.keys()) await caches.delete(k); } catch { /* no Cache Storage */ }
+  /* Pull a fresh copy of every file into the browser's cache, then reload onto them. */
+  async function refresh() {
+    try {
+      await Promise.all(watched().map(u => fetch(u, { cache: 'reload' }).catch(() => {})));
+    } catch { /* reload anyway */ }
     location.reload();
   }
 
-  // First look a few seconds after load, once the page has fetched what it needs.
   window.addEventListener('load', () => setTimeout(check, 4000));
   setInterval(() => { if (!document.hidden) check(); }, EVERY);
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden && Date.now() - lastCheck > 60 * 1000) check();
   });
 
-  window.arcadeUpdate = { check, prompt };
+  window.arcadeUpdate = { check, prompt, refresh };
 })();
