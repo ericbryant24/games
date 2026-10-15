@@ -24,16 +24,28 @@
     box.hidden = false;
     box.querySelector('span').textContent = text;
   }
+  // Every file the game is made of, simplest first, so the first one that will not
+  // import is the culprit rather than something that merely depends on it.
+  var FILES = ['vendor/three.module.min.js', 'src/noise.js', 'src/terrain.js', 'src/skier.js',
+    'src/sim.js', 'src/input.js', 'src/hud.js', 'src/render/geom.js', 'src/render/rider.js',
+    'src/render/grooves.js', 'src/render/snow.js', 'src/render/world.js', 'src/render/view.js', 'src/main.js'];
   function diagnose(first) {
-    // Ask for the module again to get the browser's own reason, which a script tag's
-    // error event never carries.
     var sw = navigator.serviceWorker && navigator.serviceWorker.controller ? ' [sw]' : '';
-    import('./src/main.js?diag=' + Date.now()).then(function () {
-      // Second time lucky: the game is running now, so say nothing.
-      if (!window.copycats) show(first + sw);
-    }, function (err) {
-      show(first + ': ' + ((err && (err.name + ': ' + err.message)) || err) + sw);
-    });
+    var i = 0;
+    (function next() {
+      if (i >= FILES.length) { if (!window.copycats) show(first + ' — every file loads on its own now; try Reload.' + sw); return; }
+      var f = FILES[i++];
+      import('./' + f).then(next, function (err) {
+        var why = (err && (err.name + ': ' + err.message)) || String(err);
+        fetch(f, { cache: 'no-store' }).then(function (r) {
+          show(first + ' — ' + f + ' fails: ' + why + ' (HTTP ' + r.status + ', ' +
+            (r.headers.get('content-type') || 'no type') + ')' + sw);
+        }, function (e2) {
+          show(first + ' — ' + f + ' cannot be fetched at all (' + ((e2 && e2.message) || e2) +
+            '). A content or ad blocker may be blocking it.' + sw);
+        });
+      });
+    })();
   }
   window.addEventListener('error', function (e) {
     var t = e.target;

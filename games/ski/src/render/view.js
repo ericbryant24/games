@@ -6,7 +6,7 @@
 import * as THREE from '../../vendor/three.module.min.js';
 import { World } from './world.js';
 import { RiderMesh, OUTFITS } from './rider.js';
-import { Tracks } from './tracks.js';
+import { Tracks } from './grooves.js';
 import { Snow, Flakes } from './snow.js';
 
 export const QUALITY = {
