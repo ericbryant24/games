@@ -1,0 +1,324 @@
+/* One rider on the snow: a skier or a snowboarder. The same physics for you and for the
+   three on your tail — the only differences are in the numbers each rider carries.
+
+   On the snow: gravity along the slope, edges that carve the velocity round towards
+   where the skis point (up to the grip a carve can hold) and skid off whatever is left,
+   snow friction and air drag. Over a convex lip the snow falls away faster than the
+   rider can follow and they leave the ground. In the air: gravity and drag, and you can
+   spin. Landing: too much speed into the slope, or skis too far across the direction of
+   travel, and it is a crash. */
+
+import { clamp, wrapAngle } from './noise.js';
+
+export const G = 9.81;
+export const RADIUS = 0.32;
+
+/* carve   lateral acceleration a clean carve can hold, m/s²
+   yaw     fastest the skis can be swung round at low speed, rad/s
+   grip    how quickly skidding is scrubbed off, 1/s
+   drag    air drag per unit mass (upright, tucked), 1/m
+   land    vertical speed into the slope a rider can absorb, m/s
+   align   how far skis can be across the direction of travel on landing, rad
+   spin    rotation rate in the air, rad/s
+   flip    somersault rate in the air, rad/s
+   pop     ollie, m/s */
+export const RIDER = {
+  player: { kind: 'ski', carve: 13, yaw: 3.1, grip: 7.5, drag: 0.0068, tuckDrag: 0.0038,
+    land: 10.5, align: 0.95, spin: 5.2, flip: 5.0, pop: 3.8 },
+  ski: { kind: 'ski', carve: 13, yaw: 3.1, grip: 7.5, drag: 0.0068, tuckDrag: 0.0038,
+    land: 9.0, align: 0.8, spin: 5.0, flip: 4.8, pop: 3.8 },
+  playerBoard: { kind: 'board', carve: 11.5, yaw: 2.7, grip: 7, drag: 0.0070, tuckDrag: 0.0040,
+    land: 11.5, align: 0.95, spin: 5.2, flip: 5.0, pop: 3.9 },
+  board: { kind: 'board', carve: 10.5, yaw: 2.4, grip: 6.5, drag: 0.0070, tuckDrag: 0.0042,
+    land: 10.5, align: 0.95, spin: 4.6, flip: 4.6, pop: 3.9 }
+};
+
+const _n = { x: 0, y: 1, z: 0 };
+const _near = [];
+
+export class Skier {
+  constructor(spec, opts) {
+    this.spec = spec;
+    this.name = opts.name;
+    this.isPlayer = !!opts.isPlayer;
+    this.x = opts.x; this.z = opts.z;
+    this.y = opts.terrain.height(this.x, this.z);
+    this.vx = 0; this.vy = 0; this.vz = 0;
+    this.psi = opts.psi || 0;          // heading: 0 is straight down the fall line (+z)
+    this.air = false;
+    this.airTime = 0;
+    this.crashed = false;
+    this.crashT = 0;
+    this.cause = '';
+    this.causeBy = null;
+
+    // Inputs, set each step by the player's thumbs or a follower's brain.
+    this.steer = 0;        // -1 left .. 1 right
+    this.tuck = false;
+    this.brake = 0;        // 0..1
+    this.wantJump = false;
+    this.flipIn = 0;       // in the air: -1 backflip .. 1 front flip
+    this.boost = 0;        // catch-up push, m/s² (followers only)
+
+    // What the renderer and the HUD want to know.
+    this.speed = 0;
+    this.skid = 0;         // 0..1 how hard the edges are scraping
+    this.lean = 0;         // signed lateral g, for leaning into the turn
+    this.popCd = 0;
+    this.jumped = false;   // set on the step an ollie happens
+    this.landed = 0;       // impact of the landing that just happened, 0 if none
+    this.spinTotal = 0;    // yaw turned through since take-off, rad (+ = left)
+    this.pitch = 0;        // somersault since take-off, rad (+ = forwards)
+    this.airId = 0;        // counts take-offs
+    this.lastTrick = null; // { spin, flip } of the jump just landed
+    this.nx = 0; this.ny = 1; this.nz = 0;
+    this.remember();
+  }
+
+  get alive() { return !this.crashed; }
+
+  /* Keep the last step's pose, so drawing can blend between steps. */
+  remember() { this.px = this.x; this.py = this.y; this.pz = this.z; this.ppsi = this.psi; this.ppitch = this.pitch; }
+
+  /* Pose blended a fraction `a` of the way from the last step to this one. */
+  pose(a, out) {
+    out.x = this.px + (this.x - this.px) * a;
+    out.y = this.py + (this.y - this.py) * a;
+    out.z = this.pz + (this.z - this.pz) * a;
+    out.psi = this.ppsi + wrapAngle(this.psi - this.ppsi) * a;
+    out.pitch = this.ppitch + (this.pitch - this.ppitch) * a;
+    return out;
+  }
+
+  crash(cause, by = null) {
+    if (this.crashed) return;
+    this.crashed = true;
+    this.cause = cause;
+    this.causeBy = by;
+    this.crashT = 0;
+    this.pitch = 0;
+  }
+
+  step(dt, terrain) {
+    this.jumped = false;
+    this.landed = 0;
+    this.popCd -= dt;
+    if (this.crashed) { this.crashT += dt; this._tumble(dt, terrain); return; }
+    if (this.air) this._fly(dt, terrain); else this._ski(dt, terrain);
+    if (!this.crashed) this._hits(terrain);
+  }
+
+  _ski(dt, T) {
+    const s = this.spec;
+    const n = T.normal(this.x, this.z, _n);
+    this.nx = n.x; this.ny = n.y; this.nz = n.z;
+
+    // Gravity along the slope.
+    let vx = this.vx + G * n.y * n.x * dt;
+    let vy = this.vy + (-G + G * n.y * n.y) * dt;
+    let vz = this.vz + G * n.y * n.z * dt;
+    let vn = vx * n.x + vy * n.y + vz * n.z;
+    vx -= vn * n.x; vy -= vn * n.y; vz -= vn * n.z;
+    let speed = Math.hypot(vx, vy, vz);
+
+    // Swing the skis. Fast at walking pace, much slower at speed, slower still tucked.
+    const yawRate = s.yaw * clamp(10 / (speed + 4), 0.32, 1) * (this.tuck ? 0.6 : 1);
+    this.psi = wrapAngle(this.psi - this.steer * yawRate * dt);
+
+    // Ski direction and its sideways partner, both in the plane of the snow.
+    let fx = Math.sin(this.psi), fy = 0, fz = Math.cos(this.psi);
+    const fn = fx * n.x + fz * n.z;
+    fx -= fn * n.x; fy -= fn * n.y; fz -= fn * n.z;
+    let fl = Math.hypot(fx, fy, fz) || 1;
+    fx /= fl; fy /= fl; fz /= fl;
+    // l = n × f
+    const lx = n.y * fz - n.z * fy, ly = n.z * fx - n.x * fz, lz = n.x * fy - n.y * fx;
+
+    let along = vx * fx + vy * fy + vz * fz;
+    let side = vx * lx + vy * ly + vz * lz;
+    let skid = 0, lean = 0;
+    if (speed > 0.05) {
+      // Skis are symmetric: running backwards is just the other way along them.
+      const back = along < 0 ? -1 : 1;
+      along *= back;
+      const beta = Math.atan2(side, along);
+      // A carve bends the path without losing speed, up to what the edges hold.
+      const maxTurn = (s.carve * (this.tuck ? 0.75 : 1)) / Math.max(speed, 2) * dt;
+      const turn = clamp(beta, -maxTurn, maxTurn);
+      const b2 = beta - turn;
+      along = speed * Math.cos(b2);
+      side = speed * Math.sin(b2);
+      lean = -(turn / dt) * speed / G;
+      // Whatever is still sideways skids, and skidding costs speed.
+      const keep = Math.exp(-s.grip * dt);
+      skid = Math.abs(side) * (1 - keep) / dt;
+      side *= keep;
+      along *= back;
+    }
+    vx = fx * along + lx * side;
+    vy = fy * along + ly * side;
+    vz = fz * along + lz * side;
+    speed = Math.hypot(vx, vy, vz);
+
+    // Snow friction, the brake (a skid-stop), air drag.
+    const mu = 0.032 + this.brake * 0.55;
+    const c = this.tuck ? s.tuckDrag : s.drag;
+    const decel = mu * G * n.y + c * speed * speed;
+    if (speed > 1e-4) {
+      const k = Math.max(0, speed - decel * dt) / speed;
+      vx *= k; vy *= k; vz *= k;
+    }
+    // A skate step or two when nearly stopped, so nobody is stranded on a flat.
+    const push = (speed < 3 && !this.brake ? 1.8 : 0) + this.boost;
+    if (push) { vx += fx * push * dt; vy += fy * push * dt; vz += fz * push * dt; }
+
+    this.skid = clamp((skid / 14) + this.brake * Math.min(1, speed / 6), 0, 1);
+    this.lean += (clamp(lean, -1.2, 1.2) - this.lean) * Math.min(1, dt * 10);
+
+    // Ollie.
+    if (this.wantJump && this.popCd <= 0) {
+      vx += n.x * s.pop; vy += n.y * s.pop; vz += n.z * s.pop;
+      this.wantJump = false;
+      this.popCd = 0.55;
+      this.jumped = true;
+      this._launch(vx, vy, vz);
+      return;
+    }
+    this.wantJump = false;
+
+    this.vx = vx; this.vy = vy; this.vz = vz;
+    this.speed = Math.hypot(vx, vy, vz);
+    this.x += vx * dt; this.z += vz * dt;
+    const yFree = this.y + vy * dt;
+    const h = T.height(this.x, this.z);
+
+    // Does the snow fall away faster than we can follow it? Check the curvature of the
+    // ground along the line of travel against what gravity can hold us to.
+    const hs = Math.hypot(vx, vz);
+    if (hs > 2) {
+      const ux = vx / hs, uz = vz / hs, e = 0.9;
+      const hf = T.height(this.x + ux * e, this.z + uz * e);
+      const hb = T.height(this.x - ux * e, this.z - uz * e);
+      const d1 = (hf - hb) / (2 * e);
+      const d2 = (hf - 2 * h + hb) / (e * e);
+      const kappa = d2 / Math.pow(1 + d1 * d1, 1.5);
+      const support = G * n.y + this.speed * this.speed * kappa;
+      if (support < 0 || yFree - h > 0.12) {
+        this.y = Math.max(yFree, h);
+        this._launch(vx, vy, vz);
+        return;
+      }
+    }
+    // Stay on the snow, turning the velocity to follow it.
+    this.y = h;
+    T.normal(this.x, this.z, _n);
+    const vn2 = vx * _n.x + vy * _n.y + vz * _n.z;
+    let wx = vx - vn2 * _n.x, wy = vy - vn2 * _n.y, wz = vz - vn2 * _n.z;
+    const wl = Math.hypot(wx, wy, wz);
+    if (wl > 1e-6) {
+      const k = this.speed / wl;
+      this.vx = wx * k; this.vy = wy * k; this.vz = wz * k;
+    }
+  }
+
+  _launch(vx, vy, vz) {
+    this.vx = vx; this.vy = vy; this.vz = vz;
+    this.air = true;
+    this.airTime = 0;
+    this.spinTotal = 0;
+    this.pitch = 0;
+    this.airId++;
+  }
+
+  _fly(dt, T) {
+    const s = this.spec;
+    this.airTime += dt;
+    this.vy -= G * dt;
+    const speed = Math.hypot(this.vx, this.vy, this.vz);
+    const c = (this.tuck ? s.tuckDrag : s.drag) * speed;
+    this.vx -= this.vx * c * dt; this.vy -= this.vy * c * dt; this.vz -= this.vz * c * dt;
+    const turn = -this.steer * s.spin * dt;
+    this.psi = wrapAngle(this.psi + turn);
+    this.spinTotal += turn;
+    this.pitch += this.flipIn * s.flip * dt;
+    this.x += this.vx * dt; this.y += this.vy * dt; this.z += this.vz * dt;
+    this.speed = Math.hypot(this.vx, this.vy, this.vz);
+    this.skid *= Math.exp(-dt * 8);
+    this.lean *= Math.exp(-dt * 4);
+
+    const h = T.height(this.x, this.z);
+    if (this.y > h) return;
+
+    // Landing.
+    const n = T.normal(this.x, this.z, _n);
+    this.y = h;
+    const into = -(this.vx * n.x + this.vy * n.y + this.vz * n.z);
+    let tx = this.vx + into * n.x, ty = this.vy + into * n.y, tz = this.vz + into * n.z;
+    const ts = Math.hypot(tx, ty, tz);
+    // How far across the line of travel are the skis? Backwards is fine.
+    let across = 0;
+    if (Math.hypot(tx, tz) > 2) {
+      across = Math.abs(wrapAngle(this.psi - Math.atan2(tx, tz)));
+      across = Math.min(across, Math.PI - across);
+    }
+    this.air = false;
+    this.landed = into;
+    const tilt = Math.abs(wrapAngle(this.pitch));
+    const tricked = Math.abs(this.spinTotal) > 1.2 || Math.abs(this.pitch) > 1.2;
+    this.lastTrick = { spin: this.spinTotal, flip: this.pitch };
+    this.pitch = 0;
+    if (tilt > 0.75) { this.crash(tilt > 2.2 ? 'head' : 'flip'); return; }
+    if (into > s.land) { this.crash('hard'); return; }
+    if (across > s.align && ts > 3) { this.crash(tricked ? 'spin' : 'sideways'); return; }
+    // A big landing costs some speed even when you ride it out.
+    const keep = 1 - 0.22 * clamp(into / s.land, 0, 1) - 0.25 * (across / s.align);
+    this.vx = tx * keep; this.vy = ty * keep; this.vz = tz * keep;
+    this.speed = ts * keep;
+    // Ride away along the skis' line, whichever end is in front.
+    if (across > 0.05) {
+      const vpsi = Math.atan2(tx, tz);
+      const flip = Math.abs(wrapAngle(this.psi - vpsi)) > Math.PI / 2 ? Math.PI : 0;
+      const d = wrapAngle(vpsi + flip - this.psi);
+      this.psi = wrapAngle(this.psi + d * 0.5);
+    }
+  }
+
+  /* After a crash: tumble on down the hill and slow to a stop in the snow. */
+  _tumble(dt, T) {
+    if (this.air) {
+      this.vy -= G * dt;
+      this.x += this.vx * dt; this.y += this.vy * dt; this.z += this.vz * dt;
+      const h = T.height(this.x, this.z);
+      if (this.y <= h) { this.y = h; this.air = false; this.vy = 0; }
+      return;
+    }
+    const n = T.normal(this.x, this.z, _n);
+    this.vx += G * n.y * n.x * dt;
+    this.vz += G * n.y * n.z * dt;
+    const hs = Math.hypot(this.vx, this.vz);
+    // A body in the snow stops quickly, and stays stopped on anything but the steeps.
+    const decel = 6.5 + 0.4 * hs;
+    const k = hs > 1e-3 ? Math.max(0, hs - decel * dt) / hs : 0;
+    this.vx *= k; this.vz *= k;
+    this.x += this.vx * dt; this.z += this.vz * dt;
+    this.y = T.height(this.x, this.z);
+    this.speed = Math.hypot(this.vx, this.vz);
+    this.skid = Math.min(1, this.speed / 8);
+  }
+
+  /* Trees and rocks. A rock you are high enough to clear is no trouble. */
+  _hits(T) {
+    T.nearby(this.x, this.z, 3, _near);
+    for (const o of _near) {
+      const dx = this.x - o.x, dz = this.z - o.z;
+      const r = o.r + RADIUS;
+      if (dx * dx + dz * dz > r * r) continue;
+      if (this.y > o.y + o.h) continue;
+      this.crash(o.kind);
+      // Stop dead against it, more or less.
+      const d = Math.hypot(dx, dz) || 1;
+      this.vx = dx / d * 1.5; this.vz = dz / d * 1.5; this.vy = 0;
+      return;
+    }
+  }
+}

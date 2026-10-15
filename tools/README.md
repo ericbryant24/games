@@ -25,3 +25,15 @@ cd tools && node race.mjs 7 1     # wind in m/s, then laps
 Everyone should finish. The fleet is reliable from about 5 to 16 m/s (10-31 kn);
 below that it is drifting conditions and boats may time out, which is realistic
 enough. A one-lap race takes roughly four and a half to nine minutes.
+
+`ski.mjs` runs headless chases for Copycats with the player handed to a simple
+autopilot, and reports who crashed, when and why.
+
+```sh
+cd tools && node ski.mjs 12 weave      # runs, then style: weave | lure | straight | tricks
+VERBOSE=1 node ski.mjs 3 lure          # every big landing and every crash
+```
+
+The autopilot is no expert and crashes plenty itself; what to look for is the chasers
+going down for reasons that follow from the line it took — clipped trees on tight
+lines, hard landings off big air, botched copies of tricks — rather than at random.

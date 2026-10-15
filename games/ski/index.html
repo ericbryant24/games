@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#dfeaf6">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<title>Copycats — shake them off the mountain</title>
+<meta name="description" content="An endless downhill ski chase. Three riders copy your every line, jump and trick. Make them crash before you do.">
+<link rel="icon" href="../../assets/favicon.svg">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <canvas id="scene"></canvas>
+  <canvas id="hud"></canvas>
+  <div id="surface" aria-label="Drag to steer, tap to jump"></div>
+
+  <button id="menuBtn" class="chip" hidden aria-label="Pause">❚❚</button>
+
+  <!-- Who's chasing — shown through the countdown ---------------------------------- -->
+  <section id="roster" class="roster hidden" aria-live="polite">
+    <h3>On your tail</h3>
+    <ul id="rosterList"></ul>
+  </section>
+
+  <!-- Start ---------------------------------------------------------------- -->
+  <section id="start" class="screen">
+    <div class="sheetbox">
+      <h1>Copycats</h1>
+      <p class="sub">Three riders are on your tail, and they copy everything — your line, your
+        jumps, your tricks. Make them crash. If you crash first, they win.
+        The faster you shake all three, the better your score.</p>
+
+      <div class="field">
+        <label>Who are you?</label>
+        <div class="seg who" id="who" data-opt="character"></div>
+      </div>
+
+      <div class="field">
+        <label>Camera</label>
+        <div class="seg" data-opt="camera">
+          <button data-v="reverse" class="on">Facing you</button>
+          <button data-v="chase">Behind you</button>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Graphics</label>
+        <div class="seg" data-opt="quality">
+          <button data-v="low">Low</button>
+          <button data-v="medium" class="on">Medium</button>
+          <button data-v="high">High</button>
+        </div>
+      </div>
+
+      <button id="go" class="primary">Drop in</button>
+
+      <div id="boardWrap" class="board hidden">
+        <h4>Fastest getaways</h4>
+        <ol id="board"></ol>
+      </div>
+
+      <details class="help">
+        <summary>How to ride</summary>
+        <ul>
+          <li><b>Drag</b> left or right anywhere to carve. Let go to run straight.</li>
+          <li><b>Drag down</b> to tuck for speed. <b>Drag up</b> to dig in and brake.</li>
+          <li><b>Tap</b> to jump — or tap a second finger while you steer.</li>
+          <li>In the air, drag sideways to <b>spin</b>, down to <b>front flip</b>, up to <b>backflip</b>.
+            Land with your skis pointing down the hill and your head up.</li>
+          <li>They follow your line, so skim trees and rocks close — they cut corners and clip them.</li>
+          <li>They copy your jumps and your tricks. Spin a 360 and they must spin one too.
+            Not everyone can.</li>
+          <li>Each run you get a new mountain and three new chasers, each with their own weakness.
+            Watch the roster at the start.</li>
+          <li>Keyboard: arrows or WASD, space to jump.</li>
+        </ul>
+      </details>
+      <p class="foot"><a href="../../">More games</a></p>
+    </div>
+  </section>
+
+  <!-- Results -------------------------------------------------------------- -->
+  <section id="results" class="screen hidden">
+    <div class="sheetbox">
+      <h2 id="resultTitle">Lost them</h2>
+      <p id="resultSub" class="sub"></p>
+      <ul id="resultList" class="results"></ul>
+      <button id="again" class="primary">Go again</button>
+      <button id="toMenu" class="ghost">Menu</button>
+    </div>
+  </section>
+
+  <!-- Paused --------------------------------------------------------------- -->
+  <section id="paused" class="screen hidden">
+    <div class="sheetbox narrow">
+      <h2>Paused</h2>
+      <button id="resume" class="primary">Resume</button>
+      <button id="quit" class="ghost">Give up</button>
+    </div>
+  </section>
+
+  <div id="loading" class="screen hidden"><div class="spinner"></div></div>
+</div>
+<script type="module" src="src/main.js"></script>
+</body>
+</html>

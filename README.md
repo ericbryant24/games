@@ -46,6 +46,36 @@ It tries to be an honest simulation rather than a boat-shaped arcade game:
 Racing rules: you have to start between the marks after the gun (over early and you owe
 the line a return), and you have to round each mark rather than cut the corner.
 
+### Copycats — `games/ski/`
+
+An endless downhill chase on a mountain generated fresh every run. You pick who you are —
+Eric, Brent or Tyler on skis, or Trevor on a board — and the other three come after you.
+They follow your line, copy your jumps and have to copy your tricks. Make all three crash
+and you win; the score is how long it took. Crash yourself and they win.
+
+- **They copy you, imperfectly.** Each chaser follows the breadcrumb trail of your line,
+  aiming a little way ahead along it — so they cut your corners. Skim a tree and the
+  ones who cut hardest clip it. They spot obstacles and swerve, if they are quick enough.
+- **Random abilities.** Every run rolls each chaser five abilities — landings, line,
+  eyes, tricks, carving — with one clear weakness and one clear strength each, shown on
+  the roster during the countdown. Find the weakness and use it.
+- **Tricks they must match.** Spin and flip in the air; whoever takes off where you did
+  has to do the same rotation. A slow spinner who comes up short lands sideways.
+- **Real enough physics.** Gravity along the slope, edges that carve up to their grip and
+  skid off the rest, drag, and a rider who leaves the snow when it curves away faster
+  than gravity can hold them — off cliff bands, kickers, rollers and moguls. Landings
+  are judged on speed into the slope and on how square your skis are.
+- **Endless terrain.** A meandering run between forest walls, built a segment at a time
+  from a seed: cliff bands with rollovers either side, kickers with a dye line on the lip,
+  rollers, mogul fields, tree islands, gates of trees to thread and rock gardens.
+- **Camera facing you** by default, Grand Mountain Adventure style: you ski towards the
+  lens, so the faces of drops and jumps are in view and the chasers are above you on
+  screen. A behind-you camera is in the menu.
+
+Controls: drag anywhere to carve, drag down to tuck, up to brake, tap (or tap a second
+finger) to jump. In the air the same drags spin and flip you. Keyboard: arrows/WASD
+and space.
+
 ## Layout
 
 ```
@@ -66,6 +96,16 @@ games/sailing/
     main.js           menu, race loop, results
     render/           sky, ocean, boat model, wake, marks, camera
   vendor/             three.js r160 (MIT), vendored so nothing loads off a CDN
+games/ski/
+  src/
+    terrain.js        the endless mountain: heights, features, trees and rocks
+    skier.js          one rider's physics — carving, skidding, air, landings
+    sim.js            the chase, headless: your line, the chasers' brains, the rules
+    input.js          one-thumb drag controls, and the keyboard
+    hud.js            clock, chasers, name tags, messages
+    main.js           menu, character picker, countdown, results, scoreboard
+    render/           mountain chunks, riders, ski tracks, snow spray, camera
+  vendor/             three.js r160 again, so each game stands alone
 tools/                headless test harnesses — see tools/README.md
 ```
 
