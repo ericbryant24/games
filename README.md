@@ -128,6 +128,20 @@ GitHub Pages, serving the repository root from the default branch — Settings �
 Deploy from a branch → `main` / `/ (root)`. The `.nojekyll` file at the root stops
 Jekyll from touching anything.
 
+## Updates and caching
+
+Every page includes `assets/update.js`, which registers the service worker in `sw.js`
+and watches for new releases. There is nothing to bump when you publish:
+
+- `sw.js` is network-first and revalidates every request with the server, so a reload
+  always gets the latest files rather than whatever the browser cached. It keeps a copy
+  of everything it fetches, so a game you have played once still loads offline.
+- `update.js` notes the ETag of every file the page loaded, re-checks them every five
+  minutes while the page is in view (and when you come back to it), and if any has
+  changed shows a small "A new version is ready — Reload" prompt.
+
+A new page needs `<script src="…/assets/update.js" defer></script>` before `</body>`.
+
 ## Licence
 
 MIT, see `LICENSE`. three.js is MIT too, and its licence header is intact at the top of
