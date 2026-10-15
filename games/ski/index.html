@@ -11,6 +11,29 @@
 <meta name="description" content="An endless downhill ski chase. Three riders copy your every line, jump and trick. Make them crash before you do.">
 <link rel="icon" href="../../assets/favicon.svg">
 <link rel="stylesheet" href="style.css">
+<script>
+/* If the game's code fails to load or start, say so instead of leaving dead buttons. */
+(function () {
+  function show(text) {
+    var box = document.getElementById('bootError');
+    if (!box || box.dataset.shown) return;
+    box.dataset.shown = '1';
+    box.hidden = false;
+    box.querySelector('span').textContent = text;
+  }
+  window.addEventListener('error', function (e) {
+    var t = e.target;
+    if (t && t !== window && (t.src || t.href)) show('Could not load ' + (t.src || t.href).split('/').slice(-2).join('/'));
+    else if (e.message) show(e.message + (e.filename ? ' (' + e.filename.split('/').pop() + ':' + e.lineno + ')' : ''));
+  }, true);
+  window.addEventListener('unhandledrejection', function (e) {
+    show(String((e.reason && e.reason.message) || e.reason));
+  });
+  window.addEventListener('load', function () {
+    setTimeout(function () { if (!window.copycats) show('The game did not start.'); }, 1500);
+  });
+})();
+</script>
 </head>
 <body>
 <div id="app">
@@ -55,6 +78,9 @@
           <button data-v="high">High</button>
         </div>
       </div>
+
+      <p id="bootError" class="boot-error" hidden>Something went wrong: <span></span>
+        <button type="button" onclick="location.reload()">Reload</button></p>
 
       <button id="go" class="primary">Drop in</button>
 
