@@ -15,7 +15,7 @@ const COLORS = OUTFITS.map(o => '#' + o.jacket.toString(16).padStart(6, '0'));
 const SETTINGS_KEY = 'copycats.settings.v1';
 const SCORES_KEY = 'copycats.scores.v1';
 
-let settings = { quality: 'medium', character: 'Eric', camera: 'reverse', ...load(SETTINGS_KEY, {}) };
+let settings = { character: 'Eric', ...load(SETTINGS_KEY, {}) };
 let scores = load(SCORES_KEY, []);
 let sim = null, view = null, hud = null;
 const controls = new Controls().attach(el('surface'));
@@ -77,7 +77,7 @@ function start() {
 function build() {
   if (view) { view.dispose(); view = null; }
   sim = new Sim({ seed: Math.floor(Math.random() * 1e9), character: playerName(), countdown: 4 });
-  view = new View(scene, sim, { quality: settings.quality, camera: settings.camera });
+  view = new View(scene, sim, { quality: 'high', camera: 'chase' });
   hud = hud || new Hud(el('hud'));
   hud.msgs = []; hud.pop = null;
   hud.resize();
@@ -116,8 +116,8 @@ function showRoster() {
         ${TRAIT_LABEL[t]}<i><b style="width:${Math.round(a[t] * 100)}%"></b></i></span>`).join('')}</div></li>`;
   }).join('');
   el('rosterList').insertAdjacentHTML('beforeend',
-    '<li class="hint"><b>Hold left or right</b> to turn · <b>hold both</b> to crouch, <b>let go</b> to jump</li>');
-  el('roster').classList.toggle('low', settings.camera === 'reverse');
+    '<li class="hint"><b>Hold right</b> to turn left, <b>left</b> to turn right · <b>hold both</b> to crouch, <b>let go</b> to jump</li>');
+  el('roster').classList.remove('low');
   el('roster').classList.remove('hidden');
 }
 
@@ -150,8 +150,8 @@ function drive(dt) {
   const pushes = controls.skate;
   controls.skate = 0;
   if (p.crashed) return;
-  // In the reverse view you ski towards the camera, so the screen's right is your left.
-  const flip = settings.camera === 'reverse' ? -1 : 1;
+  // The poles cross over: hold the right side to turn left, the left side to turn right.
+  const flip = -1;
   if (!p.air) {
     air = null;
     p.steer = controls.steer * flip;

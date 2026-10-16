@@ -68,12 +68,12 @@ and you win; the score is how long it took. Crash yourself and they win.
 - **Endless terrain.** A meandering run between forest walls, built a segment at a time
   from a seed: cliff bands with rollovers either side, kickers with a dye line on the lip,
   rollers, mogul fields, tree islands, gates of trees to thread and rock gardens.
-- **Camera facing you** by default, Grand Mountain Adventure style: you ski towards the
-  lens, so the faces of drops and jumps are in view and the chasers are above you on
-  screen. A behind-you camera is in the menu.
+- **A long-lens camera behind you**, Grand Mountain Adventure style: flat, almost
+  isometric, you just below the middle of the screen with the chasers beneath and the
+  hill ahead filling the top. Graphics always run at the highest setting.
 
-Controls are Grand Mountain Adventure's two ski poles: hold the left or right half of
-the screen to turn (slide outward for a sharp turn), hold both to crouch and let go to
+Controls are Grand Mountain Adventure's two ski poles, crossed over: hold the right half
+of the screen to turn left and the left half to turn right (slide outward for a sharp turn), hold both to crouch and let go to
 jump, tap left-right-left to skate, drag down to brake. In the air, hold a side to spin
 and drag both up or down to flip. Keyboard: arrows, down to crouch, space to jump.
 

@@ -1,7 +1,8 @@
 /* Two ski poles, Grand Mountain Adventure style: the left half of the screen is your
    left pole, the right half your right.
 
-     hold one side            turn that way (slide it outward for a sharp turn)
+     hold one side            turn the other way — right turns you left (slide outward
+                              for a sharp turn)
      hold both                crouch — let go to jump
      tap left, right, left…   skate, to get going
      drag down on a side      brake
@@ -103,7 +104,9 @@ export class Controls {
 
     const k = this.keys;
     if (k.size) {
-      ts = (k.has('arrowright') || k.has('d') ? 1 : 0) - (k.has('arrowleft') || k.has('a') ? 1 : 0);
+      // Touch poles are crossed over (right side turns you left); keys are not, so they
+      // are pre-crossed here to come out the natural way round.
+      ts = (k.has('arrowleft') || k.has('a') ? 1 : 0) - (k.has('arrowright') || k.has('d') ? 1 : 0);
       const dn = k.has('arrowdown') || k.has('s'), upk = k.has('arrowup') || k.has('w');
       crouch = dn;
       brake = upk ? 1 : 0;

@@ -27,7 +27,7 @@ export class View {
     this.canvas = canvas;
     const qname = opts.quality || 'medium';
     const q = this.q = QUALITY[qname];
-    this.mode = opts.camera || 'reverse';
+    this.mode = opts.camera || 'chase';
 
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: qname !== 'low', powerPreference: 'high-performance' });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, q.pixel));
@@ -44,8 +44,8 @@ export class View {
     // The reverse camera sits a hundred metres off, so its haze starts further out.
     this.scene.fog = this.mode === 'reverse'
       ? new THREE.Fog(HORIZON.clone(), 160, 420)
-      : new THREE.Fog(HORIZON.clone(), 110, q.ahead + 20);
-    this.camera = new THREE.PerspectiveCamera(50, 1, this.mode === 'reverse' ? 4 : 0.5, 2500);
+      : new THREE.Fog(HORIZON.clone(), 130, 400);
+    this.camera = new THREE.PerspectiveCamera(50, 1, 4, 2500);
 
     // Bright sun, and a sky that fills the shadows with blue — the look of a clear day
     // on snow.
@@ -127,13 +127,15 @@ export class View {
       out.set(x, ty + Math.sin(e) * dist, tz + Math.cos(e) * dist);
       return;
     }
-    // Behind: further back and higher as you speed up; looking well ahead of you.
-    const back = (portrait ? 15 : 13) + v * 0.22;
-    const up = (portrait ? 23 : 17) + v * 0.30;
-    const ahead = (portrait ? 4 : 8) + v * 0.45;
-    out.set(x, 0, p.z - back);
-    out.y = Math.max(p.y + up, T.height(x, p.z - back) + 4);
-    look.set(x + (p.x - x) * 0.7, p.y - 1.5, p.z + ahead);
+    // Behind, up the hill, on a long lens like GMA's: you just below the middle of the
+    // screen, the three chasing you beneath, and the hill ahead filling the top. Set
+    // against the slope itself so steep and gentle pitches frame the same.
+    const A = (portrait ? 6 : 8) + v * 0.15;
+    const dist = (portrait ? 62 : 56) + v * 0.8;
+    const e = (portrait ? 0.52 : 0.42) + Math.atan(this.fall);
+    const lx = x + (p.x - x) * 0.7, tz = p.z + A, ty = T.height(lx, tz);
+    look.set(lx, ty, tz);
+    out.set(x, ty + Math.sin(e) * dist, tz - Math.cos(e) * dist);
   }
 
   /* The pitch of the hill around you, smoothed: rise over run down the fall line. */
@@ -147,7 +149,7 @@ export class View {
     const portrait = this.camera.aspect < 1, v = this.sim.player.speed;
     return this.mode === 'reverse'
       ? (portrait ? 30 : 24) + Math.min(2, v * 0.06)
-      : (portrait ? 62 : 48) + Math.min(8, v * 0.2);
+      : (portrait ? 26 : 22) + Math.min(2, v * 0.06);
   }
 
   snapCamera() {
