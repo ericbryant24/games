@@ -23,13 +23,13 @@ export const RADIUS = 0.32;
    flip    somersault rate in the air, rad/s
    pop     ollie, m/s */
 export const RIDER = {
-  player: { kind: 'ski', carve: 22, yaw: 4.4, grip: 12, drag: 0.0068, tuckDrag: 0.0038,
+  player: { kind: 'ski', carve: 38, yaw: 4.4, grip: 12, drag: 0.0068, tuckDrag: 0.0038,
     land: 16, align: 0.95, spin: 5.2, flip: 5.0, pop: 3.8 },
-  ski: { kind: 'ski', carve: 22, yaw: 4.4, grip: 12, drag: 0.0068, tuckDrag: 0.0038,
+  ski: { kind: 'ski', carve: 36, yaw: 4.4, grip: 12, drag: 0.0068, tuckDrag: 0.0038,
     land: 9.0, align: 0.8, spin: 5.0, flip: 4.8, pop: 3.8 },
-  playerBoard: { kind: 'board', carve: 20, yaw: 4.0, grip: 11, drag: 0.0070, tuckDrag: 0.0040,
+  playerBoard: { kind: 'board', carve: 34, yaw: 4.0, grip: 11, drag: 0.0070, tuckDrag: 0.0040,
     land: 16.5, align: 0.95, spin: 5.2, flip: 5.0, pop: 3.9 },
-  board: { kind: 'board', carve: 19, yaw: 3.8, grip: 10, drag: 0.0070, tuckDrag: 0.0042,
+  board: { kind: 'board', carve: 32, yaw: 3.8, grip: 10, drag: 0.0070, tuckDrag: 0.0042,
     land: 10.5, align: 0.95, spin: 4.6, flip: 4.6, pop: 3.9 }
 };
 
@@ -134,11 +134,9 @@ export class Skier {
     // beyond 1) pivots the skis across the hill as fast as they will go, and the skid
     // that follows scrubs the speed off — hold it and you stop.
     const hard = Math.abs(this.steer) > 1.05;
-    const pivot = s.yaw * clamp(16 / (speed + 6), 0.5, 1) * (this.tuck ? 0.7 : 1);
-    const carveRate = Math.max(1.2, (s.carve * 1.1) / Math.max(speed, 1));
-    const yawRate = hard ? s.yaw * 1.1 : Math.min(pivot, carveRate);
+    const yawRate = hard ? s.yaw * 1.15 : s.yaw * clamp(18 / (speed + 6), 0.6, 1) * (this.tuck ? 0.75 : 1);
     const turnIn = hard ? Math.sign(this.steer) : clamp(this.steer, -1, 1);
-    this.yawVel += (-turnIn * yawRate - this.yawVel) * Math.min(1, dt * (hard ? 14 : 8));
+    this.yawVel += (-turnIn * yawRate - this.yawVel) * Math.min(1, dt * 30);
     this.hard = hard;
     // A hockey stop: once a hard turn has the skis right across the hill, they stay
     // there on their edges instead of swinging on round uphill.
@@ -181,10 +179,12 @@ export class Skier {
       const keep = Math.exp(-s.grip * dt);
       const scrub = Math.abs(side) * (1 - keep);
       skid = scrub / dt;
+      const lost = side * side * (1 - keep * keep);       // kinetic energy the skid takes, ×2
       side *= keep;
-      // In a carve the edges hand most of a little skid back as speed; in a hard turn
-      // the skid is the point, and it costs you.
-      along += scrub * (hard ? 0 : 0.45);
+      // In a carve the edges hand some of a little skid's energy back as speed along
+      // the skis — never more than the skid took; in a hard turn the skid is the
+      // point, and it costs you.
+      if (!hard) along = Math.sqrt(along * along + 0.45 * lost);
       if (hard) along *= Math.exp(-dt * (1.2 + 2.4 * Math.min(1, Math.abs(beta) / 0.5)));
       along *= back;
     }

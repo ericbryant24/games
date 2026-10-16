@@ -83,7 +83,7 @@ export class View {
     this.world = new World(sim.terrain, { dx: q.dx, dz: q.dz, treeDetail: q.tree });
     this.scene.add(this.world.root);
 
-    this.riderMat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
+    this.riderMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.62, metalness: 0 });
     this.riders = sim.riders.map((r, i) => {
       const kind = r.spec.kind;
       const outfit = OUTFITS[(r.outfit ?? i) % OUTFITS.length];
@@ -203,8 +203,8 @@ export class View {
     // where you are heading, and rises and falls slowly so bumps never make it bob.
     // Down the hill it keeps exact pace, or you would shudder.
     const k = 1 - Math.exp(-dt * 2.4);
-    const lead = clamp(p.vx * 0.35, -4, 4);
-    this.camVX = (this.camVX || 0) + ((this.at.x + lead - this.camX) * 6 - (this.camVX || 0) * 4.9) * dt;
+    const lead = clamp(p.vx * 0.15, -2, 2);
+    this.camVX = (this.camVX || 0) + ((this.at.x + lead - this.camX) * 30 - (this.camVX || 0) * 11) * dt;
     this.camX += this.camVX * dt;
     this.fall += (this._fall(this.at.z, this.camX) - this.fall) * (1 - Math.exp(-dt * 0.6));
     const want = this._v;

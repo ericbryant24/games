@@ -1,4 +1,4 @@
-/* Low-poly people. A skier is a pair of skis, two-piece legs that bend at the knee,
+/* People, rounded and smoothly shaded. A skier is a pair of skis, two-piece legs that bend at the knee,
    a torso that leans forward from the hips, arms and poles, and a helmeted head.
    A snowboarder is the same body stood sideways on a board.
 
@@ -11,7 +11,7 @@
      ...the body */
 
 import * as THREE from '../../vendor/three.module.min.js';
-import { lowPoly, paint } from './geom.js';
+import { paint } from './geom.js';
 
 export const OUTFITS = [
   { jacket: 0xe8463a, pants: 0x283449, helmet: 0xf4f4f4, gear: 0x1d1f25, accent: 0xffd44a },
@@ -23,7 +23,44 @@ export const OUTFITS = [
 const SKIN = 0xe9b48f;
 const GOGGLE = 0x1a2840;
 
-function box(w, h, d, hex) { return paint(lowPoly(new THREE.BoxGeometry(w, h, d)), hex); }
+/* Rounded, smoothly shaded parts — no hard facets on people. */
+function smoothed(g, hex) { g.computeVertexNormals(); return paint(g, hex); }
+function capsule(r, len, hex, seg = 12) { return smoothed(new THREE.CapsuleGeometry(r, len, 6, seg), hex); }
+function ball(r, hex, sx = 1, sy = 1, sz = 1) {
+  return smoothed(new THREE.SphereGeometry(r, 18, 12).scale(sx, sy, sz), hex);
+}
+
+/* A ski: long, thin, with its tip curling up and a little camber in the tail. */
+function skiGeo(hex) {
+  const g = new THREE.BoxGeometry(0.085, 0.022, 1.7, 2, 1, 24);
+  const p = g.attributes.position;
+  for (let i = 0; i < p.count; i++) {
+    const z = p.getZ(i) + 0.1;
+    let y = p.getY(i) + 0.02;
+    if (z > 0.62) y += (z - 0.62) ** 2 * 0.55;
+    if (z < -0.62) y += (-0.62 - z) ** 2 * 0.12;
+    const w = z > 0.85 ? Math.max(0.55, 1 - (z - 0.85) * 2.2) : 1;
+    p.setXYZ(i, p.getX(i) * w, y, z);
+  }
+  return smoothed(g, hex);
+}
+
+/* A snowboard: rounded nose and tail, both turned up. */
+function boardGeo(hex) {
+  const g = new THREE.BoxGeometry(0.3, 0.03, 1.48, 6, 1, 28);
+  const p = g.attributes.position;
+  for (let i = 0; i < p.count; i++) {
+    const z = p.getZ(i), az = Math.abs(z);
+    let x = p.getX(i), y = p.getY(i) + 0.03;
+    if (az > 0.56) {
+      const u = Math.min(1, (az - 0.56) / 0.18);
+      x *= Math.sqrt(Math.max(0.05, 1 - u * u * 0.92));
+      y += u * u * 0.09;
+    }
+    p.setXYZ(i, x, y, z);
+  }
+  return smoothed(g, hex);
+}
 
 export class RiderMesh {
   constructor(kind, outfit, material) {
@@ -48,20 +85,13 @@ export class RiderMesh {
     this.feet = new THREE.Group();
     this.lean.add(this.feet);
     if (kind === 'board') {
-      const board = box(0.30, 0.04, 1.5, o.accent);
-      board.translate(0, 0.03, 0);
-      this.feet.add(M(board));
-      const nose = box(0.27, 0.04, 0.16, o.accent).rotateX(-0.45).translate(0, 0.07, 0.8);
-      const tail = box(0.27, 0.04, 0.16, o.accent).rotateX(0.45).translate(0, 0.07, -0.8);
-      this.feet.add(M(nose), M(tail));
+      this.feet.add(M(boardGeo(o.accent)));
     } else {
       this.skis = [];
       for (const s of [-1, 1]) {
         const g = new THREE.Group();
         g.position.x = s * 0.13;
-        const ski = box(0.09, 0.03, 1.7, o.accent).translate(0, 0.02, 0.1);
-        const tip = box(0.09, 0.03, 0.18, o.accent).rotateX(-0.5).translate(0, 0.06, 1.0);
-        g.add(M(ski), M(tip));
+        g.add(M(skiGeo(o.accent)));
         this.feet.add(g);
         this.skis.push(g);
       }
@@ -74,48 +104,53 @@ export class RiderMesh {
 
     this.hips = new THREE.Group();
     this.body.add(this.hips);
+    this.hips.add(M(ball(0.17, o.pants, 1.12, 0.8, 0.88)));
     this.legs = [];
     const stance = kind === 'board' ? 0.27 : 0.13;
     for (const s of [-1, 1]) {
       const thigh = new THREE.Group();
       thigh.position.x = s * (kind === 'board' ? 0.13 : 0.11);
       this.hips.add(thigh);
-      thigh.add(M(box(0.15, 0.46, 0.17, o.pants).translate(0, -0.23, 0)));
+      thigh.add(M(capsule(0.088, 0.3, o.pants).translate(0, -0.23, 0)));
       const knee = new THREE.Group();
       knee.position.y = -0.46;
       thigh.add(knee);
-      knee.add(M(box(0.14, 0.44, 0.15, o.pants).translate(0, -0.22, 0)));
-      const boot = M(box(0.15, 0.14, 0.28, o.gear).translate(0, -0.47, 0.04));
-      knee.add(boot);
+      knee.add(M(ball(0.085, o.pants)));
+      knee.add(M(capsule(0.078, 0.29, o.pants).translate(0, -0.21, 0)));
+      knee.add(M(ball(0.095, o.gear, 1, 0.78, 1.55).translate(0, -0.44, 0.05)));
       this.legs.push({ thigh, knee, s, stance });
     }
 
     this.torso = new THREE.Group();
     this.hips.add(this.torso);
-    this.torso.add(M(box(0.40, 0.56, 0.26, o.jacket).translate(0, 0.28, 0)));
-    this.torso.add(M(box(0.41, 0.08, 0.27, o.accent).translate(0, 0.06, 0)));
+    this.torso.add(M(capsule(0.17, 0.26, o.jacket, 14).scale(1.12, 1, 0.8).translate(0, 0.3, 0)));
+    // A contrasting band round the waist and a collar.
+    this.torso.add(M(capsule(0.176, 0.02, o.accent, 14).scale(1.12, 1, 0.8).translate(0, 0.1, 0)));
+    this.torso.add(M(ball(0.1, o.accent, 1.3, 0.6, 1.1).translate(0, 0.56, 0)));
     const head = new THREE.Group();
-    head.position.y = 0.66;
+    head.position.y = 0.68;
     this.torso.add(head);
-    head.add(M(paint(lowPoly(new THREE.IcosahedronGeometry(0.13, 1)), SKIN)));
-    head.add(M(paint(lowPoly(new THREE.SphereGeometry(0.145, 8, 5, 0, Math.PI * 2, 0, Math.PI * 0.55)), o.helmet)
-      .translate(0, 0.02, -0.005)));
-    head.add(M(box(0.24, 0.07, 0.06, GOGGLE).translate(0, 0.01, 0.12)));
+    head.add(M(ball(0.118, SKIN)));
+    head.add(M(smoothed(new THREE.SphereGeometry(0.134, 20, 12, 0, Math.PI * 2, 0, Math.PI * 0.6), o.helmet)
+      .translate(0, 0.022, -0.012)));
+    head.add(M(ball(0.07, GOGGLE, 1.75, 0.62, 0.75).translate(0, 0.012, 0.098)));
     this.head = head;
 
     this.arms = [];
     for (const s of [-1, 1]) {
       const shoulder = new THREE.Group();
-      shoulder.position.set(s * 0.25, 0.52, 0);
+      shoulder.position.set(s * 0.22, 0.5, 0);
       this.torso.add(shoulder);
-      shoulder.add(M(box(0.11, 0.5, 0.12, o.jacket).translate(0, -0.25, 0)));
-      shoulder.add(M(box(0.1, 0.1, 0.1, o.gear).translate(0, -0.53, 0)));
+      shoulder.add(M(ball(0.085, o.jacket)));
+      shoulder.add(M(capsule(0.062, 0.38, o.jacket).translate(0, -0.25, 0)));
+      shoulder.add(M(ball(0.058, o.gear, 1, 1.1, 1).translate(0, -0.52, 0)));
       let pole = null;
       if (kind !== 'board') {
         pole = new THREE.Group();
         pole.position.y = -0.53;
         shoulder.add(pole);
-        pole.add(M(paint(lowPoly(new THREE.CylinderGeometry(0.012, 0.012, 1.15, 4)), 0xc8ccd4).translate(0, -0.5, 0)));
+        pole.add(M(smoothed(new THREE.CylinderGeometry(0.011, 0.009, 1.15, 8), 0xc8ccd4).translate(0, -0.5, 0)));
+        pole.add(M(smoothed(new THREE.CylinderGeometry(0.045, 0.045, 0.012, 12), 0x30343c).translate(0, -1.0, 0)));
       }
       this.arms.push({ shoulder, pole, s });
     }
@@ -154,7 +189,7 @@ export class RiderMesh {
     this._absorb = (this._absorb || 0) * Math.exp(-dt * 5);
 
     // How low: tucked, landing, in the air, or just skiing — deeper in a hard carve.
-    let want = r.tuck ? 0.85 : 0.28 + Math.min(0.35, Math.abs(this.leanNow || 0) * 0.45) + this._absorb;
+    let want = r.tuck ? 0.88 : 0.42 + Math.min(0.3, Math.abs(this.leanNow || 0) * 0.4) + this._absorb;
     if (r.air) want = 0.55 + Math.min(0.35, Math.abs(r.pitch) + Math.abs(r.spinTotal) * 0.1);
     if (r.air && r.absorb) want = 1;
     if (r.stumble > 0) want = 1;
