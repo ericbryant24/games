@@ -328,9 +328,16 @@ export class Skier {
       const r = o.r + RADIUS;
       if (dx * dx + dz * dz > r * r) continue;
       if (this.y > o.y + o.h) continue;
+      const d = Math.hypot(dx, dz) || 1;
+      // Barely moving, you just come to a stop against it.
+      const closing = -(this.vx * dx + this.vz * dz) / d;
+      if (closing < 2.5) {
+        this.x = o.x + dx / d * r; this.z = o.z + dz / d * r;
+        if (closing > 0) { this.vx += dx / d * closing; this.vz += dz / d * closing; }
+        continue;
+      }
       this.crash(o.kind);
       // Stop dead against it, more or less.
-      const d = Math.hypot(dx, dz) || 1;
       this.vx = dx / d * 1.5; this.vz = dz / d * 1.5; this.vy = 0;
       return;
     }

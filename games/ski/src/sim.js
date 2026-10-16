@@ -11,6 +11,8 @@ import { Skier, RIDER, RADIUS } from './skier.js';
 import { clamp, wrapAngle, mulberry32, hash } from './noise.js';
 
 export const DT = 1 / 120;
+export const LIVES = 2;           // crashes it takes to lose each chaser for good
+const GET_UP = 2.4;               // seconds a chaser spends in the snow before getting up
 const TRAIL_STEP = 0.5;          // metres between breadcrumbs on your line
 
 /* The three on your tail. Who they are and what they are good at is rolled fresh
@@ -101,7 +103,8 @@ export class Sim {
       const sk = new Skier(c.spec, { name: c.name, x: x0 + (i - 1) * 1.6, z: -c.gap, terrain: T });
       sk.cfg = c;
       sk.outfit = c.outfit;
-      return { skier: sk, cfg: c, idx: 0, crashTime: null, wasAir: false, copy: 0 };
+      return { skier: sk, cfg: c, idx: 0, crashTime: null, wasAir: false, copy: 0,
+        lives: LIVES, down: false, downAt: 0 };
     });
     this.tricks = new Map();      // your take-off number → the trick you landed
     this.riders = [this.player, ...this.chasers.map(c => c.skier)];
@@ -126,7 +129,8 @@ export class Sim {
     this._near = [];
   }
 
-  get remaining() { return this.chasers.filter(c => !c.skier.crashed).length; }
+  /* Chasers not yet out for good. */
+  get remaining() { return this.chasers.filter(c => c.lives > 0).length; }
 
   /* Advance by dt seconds of wall time, in fixed steps. */
   step(dt) {
@@ -170,7 +174,7 @@ export class Sim {
 
     T.ensure(p.z + 320);
     let back = p.z;
-    for (const c of this.chasers) if (!c.skier.crashed) back = Math.min(back, c.skier.z);
+    for (const c of this.chasers) if (c.lives > 0) back = Math.min(back, c.skier.z);
     T.prune(back - 90);
     this._trimTrail();
     this.distance = Math.max(this.distance, p.z);
@@ -186,10 +190,15 @@ export class Sim {
     }
     for (const c of this.chasers) {
       const s = c.skier;
-      if (s.crashed && c.crashTime === null) {
-        c.crashTime = this.runTime;
+      // Down, but with a life left: back up after a moment, on your line.
+      if (c.down && c.lives > 0 && !p.crashed && this.time - c.downAt > GET_UP) this._getUp(c);
+      if (s.crashed && !c.down) {
+        c.down = true;
+        c.downAt = this.time;
+        c.lives--;
+        if (c.lives === 0) c.crashTime = this.runTime;
         this.events.push({ type: 'crash', rider: s, cause: s.cause, by: s.causeBy, left: this.remaining,
-          trick: c.copy ? trickName(this.tricks.get(c.copy)) : '', late: this.phase === 'lost' });
+          lives: c.lives, trick: c.copy ? trickName(this.tricks.get(c.copy)) : '', late: this.phase === 'lost' });
         if (this.phase === 'run' && this.remaining === 0) {
           this.phase = 'won';
           this.endTime = this.runTime;
@@ -197,6 +206,26 @@ export class Sim {
         }
       }
     }
+  }
+
+  /* A chaser who went down gets back up: dusted off and set back on your line at
+     the nearest point to where they fell, standing still, well behind now. */
+  _getUp(c) {
+    const s = c.skier, tr = this.trail, T = this.terrain;
+    let best = Math.min(c.idx, tr.length - 1), bd = Infinity;
+    for (let j = Math.max(0, c.idx - 80); j < Math.min(tr.length, c.idx + 80); j++) {
+      const d = (tr[j].x - s.x) ** 2 + (tr[j].z - s.z) ** 2;
+      if (d < bd) { bd = d; best = j; }
+    }
+    const q = tr[best], q2 = tr[Math.min(tr.length - 1, best + 4)];
+    s.crashed = false; s.cause = ''; s.causeBy = null; s.crashT = 0;
+    s.air = false; s.stumble = 0; s.airTime = 0; s.pitch = 0; s.spinTotal = 0;
+    s.x = q.x; s.z = q.z; s.y = T.height(q.x, q.z);
+    if (q2 !== q) s.psi = Math.atan2(q2.x - q.x, q2.z - q.z);
+    s.vx = s.vy = s.vz = 0; s.speed = 0;
+    s.remember();
+    c.idx = best; c.down = false; c.wasAir = false; c.copy = 0;
+    this.events.push({ type: 'up', rider: s, lives: c.lives });
   }
 
   /* Drop a breadcrumb every half metre of your line. */
@@ -214,7 +243,7 @@ export class Sim {
 
   _trimTrail() {
     let min = Infinity;
-    for (const c of this.chasers) if (!c.skier.crashed) min = Math.min(min, c.idx);
+    for (const c of this.chasers) if (c.lives > 0) min = Math.min(min, c.idx);
     if (min === Infinity) min = this.trail.length - 2;
     const cut = Math.max(0, min - 20);
     if (cut > 400) {
@@ -276,10 +305,26 @@ export class Sim {
       }
       steer = clamp(-(spin - s.spinTotal) * 4, -1, 1);
       s.flipIn = clamp((flip - s.pitch) * 4, -1, 1);
+      // A practised rider steers their body a little in the air, back towards the line.
+      const q = tr[Math.min(n - 1, c.idx + 2)];
+      const ox = q.x - s.x, oz = q.z - s.z, od = Math.hypot(ox, oz);
+      if (od > 0.3) {
+        const pull = Math.min(2.5, od * 1.2) * DT;
+        s.vx += ox / od * pull; s.vz += oz / od * pull * 0.3;
+      }
     } else {
-      const want = Math.atan2(tgt.x - s.x, tgt.z - s.z);
+      // Line following: head the way your line runs a little ahead of them, plus a
+      // correction for however far they have drifted off it. A weak line ability
+      // means taking the direction from further ahead, which cuts your corners.
+      const j0 = Math.min(n - 2, c.idx), j1 = Math.min(n - 1, j0 + 4);
+      let tx = tr[j1].x - tr[j0].x, tz = tr[j1].z - tr[j0].z;
+      const tl = Math.hypot(tx, tz) || 1; tx /= tl; tz /= tl;
+      const offRight = (s.x - tr[j0].x) * -tz + (s.z - tr[j0].z) * tx;
+      const k0 = Math.min(n - 2, ti), k1 = Math.min(n - 1, k0 + 4);
+      const heading = k1 > k0 ? Math.atan2(tr[k1].x - tr[k0].x, tr[k1].z - tr[k0].z) : Math.atan2(tx, tz);
+      const want = heading + Math.atan(3 * offRight / Math.max(speed, 3));
       const err = wrapAngle(want - s.psi);
-      steer = clamp(-err * 2.4, -1, 1);
+      steer = clamp(-err * 3, -1, 1);
       steer += this._avoid(c, speed, err);
     }
     s.steer = clamp(steer, -1, 1);
@@ -295,8 +340,14 @@ export class Sim {
     s.brake = err < -1.5 ? clamp((-err - 1.5) / 5, 0, 1) : 0;
     // Allowed a little over your speed in proportion to how far back they are, so they
     // close the gap without ever flying a jump much faster than you did.
-    const cap = vYou * 1.04 + 0.6 + Math.max(0, err) * 0.18;
-    if (!behind && s.speed > cap) s.brake = Math.max(s.brake, clamp((s.speed - cap) / 5, 0, 0.8));
+    // Coming up to somewhere you left the ground, they slow to exactly the speed you
+    // took off at, however far back they are.
+    let lip = -1;
+    for (let j = c.idx; j < Math.min(n, c.idx + 60); j++) if (tr[j].air) { lip = j; break; }
+    const vLip = lip > 0 ? tr[Math.max(0, lip - 1)].v : Infinity;
+    let cap = Math.min(vYou * 1.03 + 0.4 + clamp(err * 0.1, 0, 1.8), vLip + 0.3);
+    if (s.speed > cap) s.brake = Math.max(s.brake, clamp((s.speed - cap) / 4, 0, 0.9));
+    if (s.speed > cap - 0.5) s.tuck = false;
     if (toPlayer < 3.2) s.brake = 1;
     // Don't ride up the back of the one in front.
     for (const o of this.chasers) {
@@ -310,7 +361,7 @@ export class Sim {
         s.boost = 0;
       }
     }
-    s.boost = err > 9 ? clamp((err - 9) * 0.18, 0, 3.2) : 0;
+    s.boost = err > 9 && s.speed < cap ? clamp((err - 9) * 0.18, 0, 3.2) : 0;
   }
 
   /* Steering correction away from whatever is in front of them that they have noticed. */
@@ -333,7 +384,9 @@ export class Sim {
       push += side * urgency;
     };
     for (const o of this.terrain.nearby(s.x, s.z, R, this._near)) consider(o.x, o.z, o.r);
-    for (const r of this.riders) if (r !== s && (r.crashed || !r.isPlayer)) consider(r.x, r.z, 0.6);
+    // Someone down in the snow is an obstacle. The others still up are not — they are
+    // on the same line, and spacing is kept by braking, not by swerving off it.
+    for (const r of this.riders) if (r !== s && r.crashed) consider(r.x, r.z, 1.1);
     return clamp(push * cfg.aware * 3.2, -1.8, 1.8);
   }
 

@@ -227,7 +227,7 @@ export class RiderMesh {
   }
 
   _crash(r, dt) {
-    if (!r.crashed) { this.tumble.rotation.set(0, 0, 0); this._spun = 0; return; }
+    if (!r.crashed) { this.tumble.rotation.set(0, 0, 0); this.flip.position.y = 0.85; this._spun = 0; return; }
     if (!this._spun) {
       // Tumble a whole number of times, more the faster you were going, then lie down.
       const turns = Math.min(3, Math.floor(r.speed / 7));

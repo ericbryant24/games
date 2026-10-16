@@ -50,15 +50,16 @@ the line a return), and you have to round each mark rather than cut the corner.
 
 An endless downhill chase on a mountain generated fresh every run. You pick who you are —
 Eric, Brent or Tyler on skis, or Trevor on a board — and the other three come after you.
-They follow your line, copy your jumps and have to copy your tricks. Make all three crash
-and you win; the score is how long it took. Crash yourself and they win.
+They follow your line, copy your jumps and have to copy your tricks. Each of them gets
+back up after their first crash; crash all three twice and you win, and the score is how
+long it took. Crash yourself and they win.
 
 - **They copy you, imperfectly.** Each chaser follows the breadcrumb trail of your line,
   aiming a little way ahead along it — so they cut your corners. Skim a tree and the
   ones who cut hardest clip it. They spot obstacles and swerve, if they are quick enough.
 - **Random abilities.** Every run rolls each chaser five abilities — landings, line,
-  eyes, tricks, carving — with one clear weakness and one clear strength each, shown on
-  the roster during the countdown. Find the weakness and use it.
+  eyes, tricks, carving — with one clear weakness and one clear strength each. Find the
+  weakness and use it.
 - **Tricks they must match.** Spin and flip in the air; whoever takes off where you did
   has to do the same rotation. A slow spinner who comes up short lands sideways.
 - **Real enough physics.** Gravity along the slope, edges that carve up to their grip and

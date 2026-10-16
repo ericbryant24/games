@@ -32,6 +32,7 @@ autopilot, and reports who crashed, when and why.
 ```sh
 cd tools && node ski.mjs 12 weave      # runs, then style: weave | lure | straight | tricks
 VERBOSE=1 node ski.mjs 3 lure          # every big landing and every crash
+IMMORTAL=1 node ski.mjs 30 tricks 180  # player cannot crash: how long to shake all three?
 ```
 
 The autopilot is no expert and crashes plenty itself; what to look for is the chasers

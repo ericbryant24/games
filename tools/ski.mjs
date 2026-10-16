@@ -15,6 +15,9 @@ const runs = Number(process.argv[2] || 8);
 const style = process.argv[3] || 'weave';
 const limit = Number(process.argv[4] || 180);
 const verbose = !!process.env.VERBOSE;
+// IMMORTAL=1: the player cannot crash, so a run measures only how long it takes to
+// shake all three — the chasers' robustness, without the autopilot's own mistakes.
+const immortal = !!process.env.IMMORTAL;
 
 function pilot(sim, t) {
   const p = sim.player, T = sim.terrain;
@@ -68,6 +71,19 @@ let won = 0, lost = 0, open = 0;
 const crashes = {}, times = [];
 for (let r = 0; r < runs; r++) {
   const sim = new Sim({ seed: 1000 + r * 7, name: 'Bot' });
+  if (immortal) {
+    // Cannot crash, but cannot ski through a tree either: bounce off it and lose speed,
+    // so the chasers are only ever following lines a real rider could have skied.
+    const p = sim.player, near = [];
+    p.crash = () => {
+      sim.terrain.nearby(p.x, p.z, 3, near);
+      for (const o of near) {
+        const dx = p.x - o.x, dz = p.z - o.z, d = Math.hypot(dx, dz) || 1, r = o.r + 0.32;
+        if (d < r) { p.x = o.x + dx / d * (r + 0.05); p.z = o.z + dz / d * (r + 0.05); }
+      }
+      p.vx *= 0.3; p.vz *= 0.3; p.vy = 0;
+    };
+  }
   let t = 0, airs = 0, maxAir = 0, vmax = 0;
   const dt = 1 / 60;
   while (t < limit && sim.phase !== 'lost' && sim.phase !== 'won') {
@@ -81,6 +97,8 @@ for (let r = 0; r < runs; r++) {
     vmax = Math.max(vmax, sim.player.speed);
     if (sim.player.air) maxAir = Math.max(maxAir, sim.player.airTime);
     for (const e of sim.events.splice(0)) {
+      if (verbose && (e.type === 'up' || e.type === 'crash') && !e.rider.isPlayer)
+        console.log(`   ${sim.runTime.toFixed(1)}s ${e.type.padEnd(5)} ${e.rider.name}${e.lives !== undefined ? ' lives ' + e.lives : ''}`);
       if (e.type === 'crash') {
         const k = `${e.rider.isPlayer ? 'YOU' : e.rider.name}:${e.cause}`;
         crashes[k] = (crashes[k] || 0) + 1;

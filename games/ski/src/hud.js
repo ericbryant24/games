@@ -73,20 +73,26 @@ export class Hud {
     const x0 = w / 2 - (chips.length * (cw + 6) - 6) / 2;
     chips.forEach((c, i) => {
       const x = x0 + i * (cw + 6), y = top + 54;
-      const down = c.skier.crashed;
-      g.fillStyle = down ? 'rgba(255,255,255,0.45)' : 'rgba(255,255,255,0.88)';
+      const out = c.lives === 0, down = c.skier.crashed && !out;
+      g.fillStyle = out ? 'rgba(255,255,255,0.45)' : down ? 'rgba(255,236,200,0.9)' : 'rgba(255,255,255,0.88)';
       rr(g, x, y, cw, 26, 13); g.fill();
       g.fillStyle = colors[c.skier.outfit];
       g.beginPath(); g.arc(x + 14, y + 13, 6, 0, Math.PI * 2); g.fill();
       if (c.cfg.kind === 'board') { g.fillStyle = '#fff'; g.fillRect(x + 10, y + 12, 8, 2); }
       g.textAlign = 'left'; g.textBaseline = 'middle';
       g.font = `700 12px ${FONT}`;
-      g.fillStyle = down ? 'rgba(19,35,58,0.45)' : INK;
+      g.fillStyle = out ? 'rgba(19,35,58,0.45)' : INK;
       g.fillText(c.cfg.name, x + 25, y + 13.5);
-      if (down) {
+      if (out) {
         const tw = g.measureText(c.cfg.name).width;
         g.strokeStyle = '#e8463a'; g.lineWidth = 2;
         g.beginPath(); g.moveTo(x + 23, y + 14); g.lineTo(x + 27 + tw, y + 12); g.stroke();
+      } else {
+        // One pip per life left.
+        for (let k = 0; k < c.lives; k++) {
+          g.fillStyle = down ? '#e89a3a' : INK;
+          g.beginPath(); g.arc(x + cw - 10 - k * 9, y + 13, 3, 0, Math.PI * 2); g.fill();
+        }
       }
     });
 

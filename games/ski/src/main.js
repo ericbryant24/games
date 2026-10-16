@@ -107,19 +107,9 @@ function fail(err) {
 }
 
 function showRoster() {
-  el('rosterList').innerHTML = sim.chasers.map((c, i) => {
-    const a = c.cfg.abilities;
-    const lo = Math.min(...TRAITS.map(t => a[t])), hi = Math.max(...TRAITS.map(t => a[t]));
-    return `<li><span class="dot" style="background:${COLORS[c.cfg.outfit]}"></span>
-      <span class="nm">${c.cfg.name}<em>${c.cfg.kind === 'board' ? 'snowboard' : 'skis'}</em></span>
-      <span class="bl">${c.cfg.blurb}</span>
-      <div class="bars">${TRAITS.map(t => `<span class="bar ${a[t] === lo ? 'weak' : a[t] === hi ? 'strong' : ''}">
-        ${TRAIT_LABEL[t]}<i><b style="width:${Math.round(a[t] * 100)}%"></b></i></span>`).join('')}</div></li>`;
-  }).join('');
-  el('rosterList').insertAdjacentHTML('beforeend',
-    '<li class="hint"><b>Hold right</b> to turn left, <b>left</b> to turn right · <b>hold both</b> to crouch, <b>let go</b> to jump</li>');
-  el('roster').classList.remove('low');
-  el('roster').classList.remove('hidden');
+  // Just the controls, and the rule, while the countdown runs.
+  hud.message('Hold right to turn left, left to turn right', 'info', 3.6,
+    'Hold both to crouch, let go to jump · knock each of them down twice');
 }
 
 /* --- the loop ------------------------------------------------------------- */
@@ -184,7 +174,6 @@ function onEvent(e) {
     case 'count': hud.message(String(e.n), 'big', 0.9); break;
     case 'go':
       hud.message('GO!', 'big', 1.1);
-      setTimeout(() => el('roster').classList.add('hidden'), 1200);
       break;
     case 'trick': hud.trick(e.name); break;
     case 'stumble':
@@ -196,11 +185,15 @@ function onEvent(e) {
         hud.message('Wipeout!', 'bad', 3, `You ${cause(e, true)}`);
       } else if (!e.late) {
         const left = e.left;
-        hud.message(`${r.name} ${cause(e, false)}`, 'good', 2.6,
-          left ? `${left} still on your tail` : '');
+        if (e.lives > 0) hud.message(`${r.name} ${cause(e, false)}`, 'good', 2.4, 'Down — but getting back up');
+        else hud.message(`${r.name} is out!`, 'good', 2.6,
+          (cause(e, false)[0].toUpperCase() + cause(e, false).slice(1)) + (left ? ` · ${left} still on your tail` : ''));
       }
       break;
     }
+    case 'up':
+      if (sim.phase === 'run') hud.message(`${e.rider.name} is back up`, 'bad', 1.8, 'One more crash and they are out');
+      break;
     case 'won':
       hud.message('Lost them all!', 'big', 3.5, fmt(e.time));
       endAt = performance.now() + 2600;
@@ -232,7 +225,6 @@ function results() {
   endAt = 0;
   running = false;
   el('menuBtn').hidden = true;
-  el('roster').classList.add('hidden');
   const won = sim.phase === 'won';
   const t = sim.endTime;
   let entry = null, rank = -1;
@@ -268,7 +260,6 @@ function toMenu() {
   endAt = 0;
   el('paused').classList.add('hidden');
   el('results').classList.add('hidden');
-  el('roster').classList.add('hidden');
   el('menuBtn').hidden = true;
   el('start').classList.remove('hidden');
   renderBoard();
