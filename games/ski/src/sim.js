@@ -56,7 +56,7 @@ export function rollChasers(seed, you = 'Eric') {
     const trick = 0.75 + 0.5 * a.tricks;
     const spec = {
       ...base,
-      land: 8.6 + 3.4 * a.landing + (kind === 'board' ? 0.8 : 0),
+      land: 10.5 + 4.5 * a.landing + (kind === 'board' ? 0.8 : 0),
       align: 0.7 + 0.3 * a.landing,
       spin: RIDER.player.spin * trick,
       flip: RIDER.player.flip * trick,
@@ -154,6 +154,7 @@ export class Sim {
     const wasCrashed = p.crashed, wasAir = p.air;
     p.step(dt, T);
     if (p.jumped) this._pendingJump = true;
+    if (wasAir && !p.air && !p.crashed && p.stumble > 0.75) this.events.push({ type: 'stumble', absorbed: p.absorb });
     if (wasAir && !p.air && !p.crashed) {
       this.tricks.set(p.airId, p.lastTrick);
       const name = trickName(p.lastTrick);

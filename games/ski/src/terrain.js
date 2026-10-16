@@ -163,7 +163,7 @@ export class Terrain {
       // A cliff band across part of the run, rolling over gently either side of it.
       const span = (0.35 + rnd() * 0.45) * hw * 2;
       const mid = c + (rnd() - 0.5) * hw * 0.9;
-      const D = 2.6 + rnd() * (4 + 4 * busy);
+      const D = 2.4 + rnd() * (3 + 3 * busy);
       seg.features.push({
         type: 'drop', z0: zc, zw: 1.5 + rnd() * 2, zf: 0.08 + rnd() * 0.12, zp: rnd() * 6.28,
         run: 1.3 + rnd() * 1.6, D, xa: mid - span / 2, xb: mid + span / 2,

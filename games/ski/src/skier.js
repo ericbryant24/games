@@ -24,11 +24,11 @@ export const RADIUS = 0.32;
    pop     ollie, m/s */
 export const RIDER = {
   player: { kind: 'ski', carve: 22, yaw: 4.4, grip: 12, drag: 0.0068, tuckDrag: 0.0038,
-    land: 10.5, align: 0.95, spin: 5.2, flip: 5.0, pop: 3.8 },
+    land: 16, align: 0.95, spin: 5.2, flip: 5.0, pop: 3.8 },
   ski: { kind: 'ski', carve: 22, yaw: 4.4, grip: 12, drag: 0.0068, tuckDrag: 0.0038,
     land: 9.0, align: 0.8, spin: 5.0, flip: 4.8, pop: 3.8 },
   playerBoard: { kind: 'board', carve: 20, yaw: 4.0, grip: 11, drag: 0.0070, tuckDrag: 0.0040,
-    land: 11.5, align: 0.95, spin: 5.2, flip: 5.0, pop: 3.9 },
+    land: 16.5, align: 0.95, spin: 5.2, flip: 5.0, pop: 3.9 },
   board: { kind: 'board', carve: 19, yaw: 3.8, grip: 10, drag: 0.0070, tuckDrag: 0.0042,
     land: 10.5, align: 0.95, spin: 4.6, flip: 4.6, pop: 3.9 }
 };
@@ -59,6 +59,8 @@ export class Skier {
     this.wantJump = false;
     this.flipIn = 0;       // in the air: -1 backflip .. 1 front flip
     this.skating = 0;      // seconds of skating left to show
+    this.absorb = false;   // crouched, ready to soak up a landing
+    this.stumble = 0;      // seconds of wobble left after a heavy landing
     this.boost = 0;        // catch-up push, m/s² (followers only)
 
     // What the renderer and the HUD want to know.
@@ -177,6 +179,7 @@ export class Skier {
     if (push) { vx += fx * push * dt; vy += fy * push * dt; vz += fz * push * dt; }
     if (speed < 3 && !this.brake) this.skating = Math.max(this.skating, 0.3);
     this.skating = Math.max(0, this.skating - dt);
+    this.stumble = Math.max(0, this.stumble - dt);
 
     this.skid = clamp((skid / 14) + this.brake * Math.min(1, speed / 6), 0, 1);
     this.lean += (clamp(lean, -1.2, 1.2) - this.lean) * Math.min(1, dt * 10);
@@ -275,10 +278,14 @@ export class Skier {
     this.lastTrick = { spin: this.spinTotal, flip: this.pitch };
     this.pitch = 0;
     if (tilt > 0.75) { this.crash(tilt > 2.2 ? 'head' : 'flip'); return; }
-    if (into > s.land) { this.crash('hard'); return; }
+    // Crouching as you land soaks up a good deal more. A heavy landing short of the
+    // limit is a stumble — it costs speed, not the run.
+    const limit = s.land * (this.absorb ? 1.25 : 1);
+    if (into > limit) { this.crash('hard'); return; }
     if (across > s.align && ts > 3) { this.crash(tricked ? 'spin' : 'sideways'); return; }
-    // A big landing costs some speed even when you ride it out.
-    const keep = 1 - 0.22 * clamp(into / s.land, 0, 1) - 0.25 * (across / s.align);
+    const heavy = into > limit * 0.7;
+    if (heavy) this.stumble = 0.8;
+    const keep = heavy ? 0.6 : 1 - 0.18 * clamp(into / limit, 0, 1) - 0.25 * (across / s.align);
     this.vx = tx * keep; this.vy = ty * keep; this.vz = tz * keep;
     this.speed = ts * keep;
     // Ride away along the skis' line, whichever end is in front.

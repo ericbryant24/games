@@ -21,7 +21,8 @@ let sim = null, view = null, hud = null;
 const controls = new Controls().attach(el('surface'));
 let running = false, paused = false, raf = 0, last = 0, endAt = 0;
 let air = null;
-let freeze = false;   // debugging: draw without stepping the world   // how the current jump started, for telling tricks from steering
+let freeze = false;
+const hints = { absorb: 0 };   // debugging: draw without stepping the world   // how the current jump started, for telling tricks from steering
 
 function load(key, fallback) {
   try { const v = JSON.parse(localStorage.getItem(key)); return v ?? fallback; } catch { return fallback; }
@@ -175,6 +176,7 @@ function drive(dt) {
   p.steer = air.spin && live && Math.abs(controls.steer) > 0.2 ? Math.max(-1, Math.min(1, controls.steer)) * flip : 0;
   p.flipIn = air.flip && live && Math.abs(controls.vert) > 0.2 ? controls.vert : 0;
   p.tuck = false; p.brake = 0;
+  p.absorb = controls.crouch;
 }
 
 function onEvent(e) {
@@ -185,6 +187,9 @@ function onEvent(e) {
       setTimeout(() => el('roster').classList.add('hidden'), 1200);
       break;
     case 'trick': hud.trick(e.name); break;
+    case 'stumble':
+      if (!e.absorbed && hints.absorb < 3) { hints.absorb++; hud.message('Heavy landing!', 'info', 2.2, 'Hold both sides as you land to soak it up'); }
+      break;
     case 'crash': {
       const r = e.rider;
       if (r.isPlayer) {

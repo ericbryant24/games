@@ -146,11 +146,15 @@ export class RiderMesh {
     // How low: tucked, landing, in the air, or just skiing.
     let want = r.tuck ? 0.85 : 0.3 + Math.min(0.3, Math.abs(r.lean) * 0.25);
     if (r.air) want = 0.55 + Math.min(0.35, Math.abs(r.pitch) + Math.abs(r.spinTotal) * 0.1);
+    if (r.air && r.absorb) want = 1;
+    if (r.stumble > 0) want = 1;
     if (r.landed) this.crouch = Math.min(1, this.crouch + r.landed * 0.08);
     this.crouch += (want - this.crouch) * Math.min(1, dt * 7);
 
     // Lean into the turn — the board leans over its edge instead.
-    const leanTo = r.crashed ? 0 : Math.max(-0.75, Math.min(0.75, -r.lean * 0.6));
+    let leanTo = r.crashed ? 0 : Math.max(-0.75, Math.min(0.75, -r.lean * 0.6));
+    // A stumble wobbles you from side to side as you fight to stay up.
+    if (r.stumble > 0 && !r.crashed) leanTo += Math.sin(this.time * 18) * 0.25 * r.stumble;
     this.lean.rotation.z += (leanTo - this.lean.rotation.z) * Math.min(1, dt * 8);
 
     this._pose(r);
