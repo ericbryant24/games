@@ -109,7 +109,7 @@ function fail(err) {
 function showRoster() {
   // Just the controls, and the rule, while the countdown runs.
   hud.message('Hold right to turn left, left to turn right', 'info', 3.6,
-    'Hold both to crouch, let go to jump · knock each of them down twice');
+    'Slide outward: hard turn · both: crouch, let go: jump');
 }
 
 /* --- the loop ------------------------------------------------------------- */

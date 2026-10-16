@@ -44,6 +44,23 @@ export class World {
     this.trees = makeTrees(opts.treeDetail ?? 1);
     this.rocks = makeRocks();
     this.treeMat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
+    // Anything standing between the camera and you dissolves into a fine stipple
+    // around you, so a tree never hides your skier.
+    this.uniforms.uSee = { value: new THREE.Vector3(-999, -999, 0) };   // px, px, depth
+    this.uniforms.uSeeR = { value: 80 };
+    this.treeMat.onBeforeCompile = (sh) => {
+      sh.uniforms.uSee = this.uniforms.uSee;
+      sh.uniforms.uSeeR = this.uniforms.uSeeR;
+      sh.fragmentShader = sh.fragmentShader
+        .replace('#include <common>', '#include <common>\nuniform vec3 uSee;\nuniform float uSeeR;')
+        .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>
+          float seeD = distance(gl_FragCoord.xy, uSee.xy);
+          if (gl_FragCoord.z < uSee.z && seeD < uSeeR) {
+            float t = smoothstep(uSeeR, uSeeR * 0.55, seeD);
+            float n = fract(sin(dot(floor(gl_FragCoord.xy), vec2(12.9898, 78.233))) * 43758.5453);
+            if (n < t * 0.8) discard;
+          }`);
+    };
     this.rockMat = this.treeMat;
     this._m = new THREE.Matrix4();
     this._q = new THREE.Quaternion();

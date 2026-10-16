@@ -143,19 +143,40 @@ export class RiderMesh {
 
     this.flip.rotation.x = r.air ? at.pitch : this.flip.rotation.x * Math.exp(-dt * 10);
 
-    // How low: tucked, landing, in the air, or just skiing.
-    let want = r.tuck ? 0.85 : 0.3 + Math.min(0.3, Math.abs(r.lean) * 0.25);
+    // Legs as suspension: feel how sharply the snow underfoot pushes up or drops away,
+    // and soak it up at the knees, so the body glides while the skis follow the bumps.
+    if (dt > 0) {
+      const vy = (at.y - (this._py ?? at.y)) / dt;
+      const ay = (vy - (this._pvy ?? vy)) / dt;
+      this._py = at.y; this._pvy = vy;
+      if (!r.air && !r.crashed) this._absorb = Math.max(-0.25, Math.min(0.45, (this._absorb || 0) + ay * 0.0016));
+    }
+    this._absorb = (this._absorb || 0) * Math.exp(-dt * 5);
+
+    // How low: tucked, landing, in the air, or just skiing — deeper in a hard carve.
+    let want = r.tuck ? 0.85 : 0.28 + Math.min(0.35, Math.abs(this.leanNow || 0) * 0.45) + this._absorb;
     if (r.air) want = 0.55 + Math.min(0.35, Math.abs(r.pitch) + Math.abs(r.spinTotal) * 0.1);
     if (r.air && r.absorb) want = 1;
     if (r.stumble > 0) want = 1;
     if (r.landed) this.crouch = Math.min(1, this.crouch + r.landed * 0.08);
     this.crouch += (want - this.crouch) * Math.min(1, dt * 7);
 
-    // Lean into the turn — the board leans over its edge instead.
-    let leanTo = r.crashed ? 0 : Math.max(-0.75, Math.min(0.75, -r.lean * 0.6));
-    // A stumble wobbles you from side to side as you fight to stay up.
+    // Lean into the turn on a soft spring, so it rolls in and out of each arc rather
+    // than snapping — the board leans over its edge instead.
+    let leanTo = r.crashed || r.air ? 0 : Math.max(-0.8, Math.min(0.8, -r.lean * 0.55));
     if (r.stumble > 0 && !r.crashed) leanTo += Math.sin(this.time * 18) * 0.25 * r.stumble;
-    this.lean.rotation.z += (leanTo - this.lean.rotation.z) * Math.min(1, dt * 8);
+    const k = 60, damp = 2 * Math.sqrt(k);
+    this.leanVel = (this.leanVel || 0) + ((leanTo - (this.leanNow || 0)) * k - (this.leanVel || 0) * damp) * dt;
+    this.leanNow = (this.leanNow || 0) + this.leanVel * dt;
+    this.lean.rotation.z = this.leanNow;
+
+    // A pole plant on the new inside each time you change edges.
+    const side = Math.sign(this.leanNow);
+    if (side && side !== this._edge && Math.abs(this.leanNow) > 0.12 && !r.air) {
+      this._edge = side;
+      this._plant = { side, t: 0 };
+    }
+    if (this._plant) { this._plant.t += dt; if (this._plant.t > 0.45) this._plant = null; }
 
     this._pose(r);
     this._crash(r, dt);
@@ -183,8 +204,11 @@ export class RiderMesh {
         L.knee.rotation.z = 0;
       }
     }
-    // Lean the torso forward to keep the weight over the feet.
+    // Lean the torso forward to keep the weight over the feet, and keep the upper body
+    // quieter than the legs through a turn — hips in, shoulders level: angulation.
     this.torso.rotation.x = board ? 0.25 + 0.4 * c : 0.25 + 0.75 * c - (r.brake ? 0.2 : 0);
+    this.torso.rotation.z = -(this.leanNow || 0) * (board ? 0.3 : 0.55);
+    this.head.rotation.z = -(this.leanNow || 0) * 0.25;
     if (board) this.body.position.z = 0;
     const flail = r.air ? Math.sin(this.time * 9) * 0.15 : 0;
     for (const A of this.arms) {
@@ -192,10 +216,18 @@ export class RiderMesh {
         A.shoulder.rotation.z = A.s * (0.9 + flail);
         A.shoulder.rotation.x = -0.3;
       } else {
-        // Hands forward, poles trailing.
+        // Hands forward, poles trailing; the outside hand lifts a little for balance.
+        const outside = Math.max(0, A.s * (this.leanNow || 0));
         A.shoulder.rotation.x = -0.55 - 0.5 * c + flail;
-        A.shoulder.rotation.z = A.s * (0.12 + 0.1 * c);
+        A.shoulder.rotation.z = A.s * (0.12 + 0.1 * c + outside * 0.5);
         if (A.pole) A.pole.rotation.x = 1.25 + 0.4 * c;
+        // Planting: reach forward and touch the pole tip down beside the inside ski.
+        const P = this._plant;
+        if (P && A.pole && A.s === -P.side && !r.air) {
+          const u = Math.sin(Math.min(1, P.t / 0.45) * Math.PI);
+          A.shoulder.rotation.x -= 0.45 * u;
+          A.pole.rotation.x -= 0.9 * u;
+        }
       }
     }
     if (this.skis) {

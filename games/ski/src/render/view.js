@@ -17,6 +17,22 @@ export const QUALITY = {
 
 const HORIZON = new THREE.Color(0xdfeaf6);
 const ZENITH = new THREE.Color(0x5f9be0);
+const UP = new THREE.Vector3(0, 1, 0);
+const BLOB_GEO = new THREE.PlaneGeometry(1.5, 1.5).rotateX(-Math.PI / 2);
+function blobTexture() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const g = c.getContext('2d');
+  const r = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  r.addColorStop(0, 'rgba(255,255,255,1)');
+  r.addColorStop(0.5, 'rgba(255,255,255,0.5)');
+  r.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = r; g.fillRect(0, 0, 64, 64);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
 const SUN_DIR = new THREE.Vector3(-0.72, 0.46, 0.52).normalize();
 const LIGHT_U = new THREE.Vector3(0, 1, 0).cross(SUN_DIR).normalize();
 const LIGHT_W = SUN_DIR.clone().cross(LIGHT_U).normalize();
@@ -87,6 +103,7 @@ export class View {
     }
 
     this.cam = new THREE.Vector3();
+    this._nv = new THREE.Vector3();
     this.look = new THREE.Vector3();
     this.camX = 0;
     this.shake = 0;
@@ -176,22 +193,28 @@ export class View {
       this._spray(e.r, dt);
     }
     this.at = this.riders[0].at;
+    for (const e of this.riders) this._blob(e);
+    this._seeThrough();
+    this._pace(dt);
     this.snow.update(dt, this.h);
     this.world.uniforms.uTime.value += dt;
 
-    // The camera drifts across the hill after you, and is a touch springy vertically
-    // so landings register. Down the hill it keeps exact pace, or you would shudder.
+    // The camera floats: it drifts across the hill after you, leaning a little towards
+    // where you are heading, and rises and falls slowly so bumps never make it bob.
+    // Down the hill it keeps exact pace, or you would shudder.
     const k = 1 - Math.exp(-dt * 2.4);
-    this.camX += (this.at.x - this.camX) * k;
-    this.fall += (this._fall(this.at.z, this.camX) - this.fall) * (1 - Math.exp(-dt * 0.8));
+    const lead = clamp(p.vx * 0.35, -4, 4);
+    this.camVX = (this.camVX || 0) + ((this.at.x + lead - this.camX) * 6 - (this.camVX || 0) * 4.9) * dt;
+    this.camX += this.camVX * dt;
+    this.fall += (this._fall(this.at.z, this.camX) - this.fall) * (1 - Math.exp(-dt * 0.6));
     const want = this._v;
     const look = this._look || (this._look = new THREE.Vector3());
     this._target(want, look);
-    const ky = 1 - Math.exp(-dt * 5);
+    const ky = 1 - Math.exp(-dt * 1.8);
     this.cam.set(want.x, this.cam.y + (want.y - this.cam.y) * ky, want.z);
     this.look.set(look.x, this.look.y + (look.y - this.look.y) * ky, look.z);
-    if (p.landed > 3) this.shake = Math.min(0.5, p.landed * 0.04);
-    if (p.crashed && p.crashT < 0.02) this.shake = 0.7;
+    // Only a crash jolts the picture, and only a little.
+    if (p.crashed && p.crashT < 0.02) this.shake = 0.35;
     this.shake *= Math.exp(-dt * 6);
     this.camera.position.copy(this.cam);
     if (this.shake > 0.01) {
@@ -222,6 +245,53 @@ export class View {
     if (this.flakes) this.flakes.update(dt, this.cam.x, this.at.y + 8, this.at.z + 6);
   }
 
+  /* A soft shadow pooled on the snow right under each rider — it is what makes them
+     sit on the hill rather than float over it, and it shrinks and fades as they fly. */
+  _blob(e) {
+    if (!e.blob) {
+      e.blob = new THREE.Mesh(BLOB_GEO, new THREE.MeshBasicMaterial({
+        map: blobTexture(), color: 0x2a3a66, transparent: true, depthWrite: false,
+        polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 }));
+      e.blob.renderOrder = 2;
+      this.scene.add(e.blob);
+    }
+    const T = this.sim.terrain, at = e.at;
+    const g = T.height(at.x, at.z), h = Math.max(0, at.y - g);
+    T.normal(at.x, at.z, this._n || (this._n = { x: 0, y: 1, z: 0 }));
+    e.blob.position.set(at.x, g + 0.04, at.z);
+    e.blob.quaternion.setFromUnitVectors(UP, this._nv.set(this._n.x, this._n.y, this._n.z));
+    e.blob.rotateY(at.psi);
+    const sc = (e.r.spec.kind === 'board' ? 1.25 : 1) * (1 + h * 0.12);
+    e.blob.scale.set(sc, 1, sc * 1.5);
+    e.blob.material.opacity = 0.42 * Math.max(0, 1 - h / 7);
+  }
+
+  /* Tell the trees where you are on screen, so the ones in front of you can thin out. */
+  _seeThrough() {
+    const at = this.at, pr = this.renderer.getPixelRatio();
+    const v = this._sp || (this._sp = new THREE.Vector3());
+    v.set(at.x, at.y + 1.0, at.z).project(this.camera);
+    const u = this.world.uniforms;
+    u.uSee.value.set((v.x * 0.5 + 0.5) * this.w * pr, (v.y * 0.5 + 0.5) * this.h * pr, v.z * 0.5 + 0.5 - 0.0005);
+    u.uSeeR.value = 70 * pr;
+  }
+
+  /* Keep the frame rate steady: if frames run long, render a touch fewer pixels; when
+     there is headroom again, creep back up to full sharpness. */
+  _pace(dt) {
+    this._ft = this._ft === undefined ? 1 / 60 : this._ft + (dt - this._ft) * 0.05;
+    this._pt = (this._pt || 0) + dt;
+    if (this._pt < 1.5 || dt <= 0) return;
+    this._pt = 0;
+    const max = Math.min(window.devicePixelRatio || 1, this.q.pixel);
+    let pr = this.renderer.getPixelRatio();
+    if (this._ft > 1 / 50 && pr > 1) { pr = Math.max(1, pr - 0.25); this._good = 0; }
+    else if (this._ft < 1 / 58 && pr < max && (this._good = (this._good || 0) + 1) >= 3) { pr = Math.min(max, pr + 0.25); this._good = 0; }
+    else return;
+    this.renderer.setPixelRatio(pr);
+    this.renderer.setSize(this.w, this.h, false);
+  }
+
   /* Snow thrown up by edges, landings and crashes. */
   _spray(r, dt) {
     const sn = this.snow;
@@ -236,6 +306,18 @@ export class View {
     if (r.speed > 9 && Math.random() < (r.speed - 9) * dt * 2.2) {
       sn.emit(r.x - Math.sin(r.psi) * 0.6, r.y + 0.05, r.z - Math.cos(r.psi) * 0.6,
         r.vx * 0.25, 0.5, r.vz * 0.25, 1, 0.5, 0.55, 0.7);
+    }
+    // A carve peels a ribbon of snow off the outside edge, more the harder you lean.
+    const carve = Math.max(0, Math.min(1, (Math.abs(r.lean) - 0.3) * 1.4)) * Math.min(1, r.speed / 12);
+    if (carve > 0.02) {
+      const nc = carve * dt * 70;
+      const cc = Math.floor(nc) + (Math.random() < nc % 1 ? 1 : 0);
+      if (cc) {
+        const sd = r.lean > 0 ? 1 : -1;
+        const ox = -Math.cos(r.psi) * sd, oz = Math.sin(r.psi) * sd;
+        sn.emit(r.x + ox * 0.35 - Math.sin(r.psi) * 0.4, r.y + 0.05, r.z + oz * 0.35 - Math.cos(r.psi) * 0.4,
+          ox * 2.2 * carve + r.vx * 0.35, 1.3 * carve, oz * 2.2 * carve + r.vz * 0.35, cc, 0.6, 0.6, 0.65);
+      }
     }
     const amount = r.skid * Math.min(1, r.speed / 8);
     if (amount < 0.06) return;

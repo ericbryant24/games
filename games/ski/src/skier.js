@@ -60,6 +60,8 @@ export class Skier {
     this.flipIn = 0;       // in the air: -1 backflip .. 1 front flip
     this.skating = 0;      // seconds of skating left to show
     this.absorb = false;   // crouched, ready to soak up a landing
+    this.yawVel = 0;       // how fast the skis are swinging, rad/s
+    this.hard = false;     // in a hard, skidding turn
     this.stumble = 0;      // seconds of wobble left after a heavy landing
     this.boost = 0;        // catch-up push, m/s² (followers only)
 
@@ -124,9 +126,31 @@ export class Skier {
     vx -= vn * n.x; vy -= vn * n.y; vz -= vn * n.z;
     let speed = Math.hypot(vx, vy, vz);
 
-    // Swing the skis: quick and nimble, a little less so at full speed or tucked.
-    const yawRate = s.yaw * clamp(16 / (speed + 6), 0.5, 1) * (this.tuck ? 0.7 : 1);
-    this.psi = wrapAngle(this.psi - this.steer * yawRate * dt);
+    // Swing the skis: quick and nimble, a little less so at full speed or tucked. The
+    // swing itself has a little momentum, so turns roll in and out as smooth arcs
+    // instead of snapping on and off with your thumb.
+    // A normal hold carves: the skis swing only as fast as the edges can bend your path,
+    // so the turn is a clean sweeping arc that keeps your speed. A hard turn (steer
+    // beyond 1) pivots the skis across the hill as fast as they will go, and the skid
+    // that follows scrubs the speed off — hold it and you stop.
+    const hard = Math.abs(this.steer) > 1.05;
+    const pivot = s.yaw * clamp(16 / (speed + 6), 0.5, 1) * (this.tuck ? 0.7 : 1);
+    const carveRate = Math.max(1.2, (s.carve * 1.1) / Math.max(speed, 1));
+    const yawRate = hard ? s.yaw * 1.1 : Math.min(pivot, carveRate);
+    const turnIn = hard ? Math.sign(this.steer) : clamp(this.steer, -1, 1);
+    this.yawVel += (-turnIn * yawRate - this.yawVel) * Math.min(1, dt * (hard ? 14 : 8));
+    this.hard = hard;
+    // A hockey stop: once a hard turn has the skis right across the hill, they stay
+    // there on their edges instead of swinging on round uphill.
+    if (hard) {
+      const nh = Math.hypot(n.x, n.z);
+      if (nh > 0.02) {
+        const downhill = (Math.sin(this.psi) * n.x + Math.cos(this.psi) * n.z) / nh;
+        const cross = Math.cos(this.psi) * n.x - Math.sin(this.psi) * n.z;   // which way is downhill: left or right
+        if (downhill < 0.08 && Math.sign(this.yawVel) === Math.sign(-cross)) this.yawVel = 0;
+      }
+    }
+    this.psi = wrapAngle(this.psi + this.yawVel * dt);
 
     // Ski direction and its sideways partner, both in the plane of the snow.
     let fx = Math.sin(this.psi), fy = 0, fz = Math.cos(this.psi);
@@ -158,7 +182,10 @@ export class Skier {
       const scrub = Math.abs(side) * (1 - keep);
       skid = scrub / dt;
       side *= keep;
-      along += scrub * 0.45;
+      // In a carve the edges hand most of a little skid back as speed; in a hard turn
+      // the skid is the point, and it costs you.
+      along += scrub * (hard ? 0 : 0.45);
+      if (hard) along *= Math.exp(-dt * (1.2 + 2.4 * Math.min(1, Math.abs(beta) / 0.5)));
       along *= back;
     }
     vx = fx * along + lx * side;
@@ -167,7 +194,7 @@ export class Skier {
     speed = Math.hypot(vx, vy, vz);
 
     // Snow friction, the brake (a skid-stop), air drag.
-    const mu = 0.032 + this.brake * 0.55;
+    const mu = 0.032 + this.brake * 0.8;
     const c = this.tuck ? s.tuckDrag : s.drag;
     const decel = mu * G * n.y + c * speed * speed;
     if (speed > 1e-4) {
@@ -235,6 +262,7 @@ export class Skier {
     this.vx = vx; this.vy = vy; this.vz = vz;
     this.air = true;
     this.airTime = 0;
+    this.yawVel = 0;
     this.spinTotal = 0;
     this.pitch = 0;
     this.airId++;

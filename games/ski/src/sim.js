@@ -343,9 +343,12 @@ export class Sim {
     // Coming up to somewhere you left the ground, they slow to exactly the speed you
     // took off at, however far back they are.
     let lip = -1;
-    for (let j = c.idx; j < Math.min(n, c.idx + 60); j++) if (tr[j].air) { lip = j; break; }
+    for (let j = c.idx; j < Math.min(n, c.idx + 50); j++) if (tr[j].air) { lip = j; break; }
     const vLip = lip > 0 ? tr[Math.max(0, lip - 1)].v : Infinity;
-    let cap = Math.min(vYou * 1.03 + 0.4 + clamp(err * 0.1, 0, 1.8), vLip + 0.3);
+    const vCatch = vYou * 1.05 + 0.5 + clamp(err * 0.3, 0, 9);
+    // ...but only the stretch right before a lip holds them to your take-off speed.
+    const nearLip = lip > 0 && (tr[lip].s - tr[c.idx].s) < 16;
+    let cap = nearLip ? Math.min(vCatch, vLip + 0.3) : vCatch;
     if (s.speed > cap) s.brake = Math.max(s.brake, clamp((s.speed - cap) / 4, 0, 0.9));
     if (s.speed > cap - 0.5) s.tuck = false;
     if (toPlayer < 3.2) s.brake = 1;
@@ -361,7 +364,7 @@ export class Sim {
         s.boost = 0;
       }
     }
-    s.boost = err > 9 && s.speed < cap ? clamp((err - 9) * 0.18, 0, 3.2) : 0;
+    s.boost = err > 5 && s.speed < cap ? clamp((err - 5) * 0.25, 0, 4.5) : 0;
   }
 
   /* Steering correction away from whatever is in front of them that they have noticed. */

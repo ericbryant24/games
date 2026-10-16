@@ -106,19 +106,19 @@ export class Hud {
     g.fillText('KM/H', w - 16, top + 29);
 
     // Messages, stacked under the chips.
-    let my = h * 0.52;
+    let my = Math.max(118, h * 0.2);   // up under the chips, clear of you
     for (const m of this.msgs) {
       m.t -= dt;
       const a = Math.min(1, m.t * 2.5, (m.life - m.t) * 8);
       g.globalAlpha = Math.max(0, a);
       g.textAlign = 'center'; g.textBaseline = 'middle';
       const big = m.kind === 'big';
-      g.font = `${big ? 900 : 800} ${big ? 44 : 19}px ${FONT}`;
+      g.font = `${big ? 900 : 800} ${big ? 36 : 16}px ${FONT}`;
       const fill = m.kind === 'good' ? '#178a4e' : m.kind === 'bad' ? '#c8352a' : INK;
       g.lineWidth = big ? 8 : 5; g.strokeStyle = 'rgba(255,255,255,0.9)';
       g.strokeText(m.text, w / 2, my); g.fillStyle = fill; g.fillText(m.text, w / 2, my);
       if (m.sub) {
-        g.font = `700 13px ${FONT}`;
+        g.font = `700 12px ${FONT}`;
         g.lineWidth = 4; g.strokeText(m.sub, w / 2, my + (big ? 32 : 20));
         g.fillStyle = 'rgba(19,35,58,0.8)'; g.fillText(m.sub, w / 2, my + (big ? 32 : 20));
       }
@@ -157,7 +157,7 @@ export class Hud {
     const g = this.g;
     g.font = `800 10px ${FONT}`;
     const tw = g.measureText(text).width + 12;
-    g.globalAlpha = down ? 0.5 : 0.92;
+    g.globalAlpha = down ? 0.4 : 0.72;
     g.fillStyle = col;
     rr(g, x - tw / 2, y - 16, tw, 15, 7.5); g.fill();
     g.beginPath(); g.moveTo(x - 4, y - 1.5); g.lineTo(x + 4, y - 1.5); g.lineTo(x, y + 3); g.fill();
