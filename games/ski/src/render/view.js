@@ -7,7 +7,7 @@ import * as THREE from '../../vendor/three.module.min.js';
 import { World } from './world.js';
 import { RiderMesh, OUTFITS } from './rider.js';
 import { Tracks } from './grooves.js';
-import { Snow, Flakes } from './snow.js';
+import { Snow, Flakes } from './powder.js';
 
 export const QUALITY = {
   low:    { pixel: 1.0,  shadow: 0,    dx: 2.2, dz: 1.4, ahead: 220, tree: 0.4, spray: 400, flakes: 0 },

@@ -12,10 +12,16 @@
 <link rel="icon" href="../../assets/favicon.svg">
 <link rel="stylesheet" href="style.css">
 <script>
-/* If the game's code fails to load or start, say why instead of leaving dead buttons,
+/* Getting the game running, whatever is in the way.
+
+   Content blockers block script files by name (a "snow.js" looks like a falling-snow
+   gimmick, a "tracks.js" like a tracker) and one blocked module stops the whole game.
+   They block the browser loading a file as a script, not fetching it as data — so if
+   the game fails to load, fetch every module as text, point their imports at each
+   other through blob: URLs, and start it from those. Only if that fails too, say why,
    and offer a reload that first clears out anything cached. */
 (function () {
-  var told = false;
+  var told = false, rescuing = false;
   function show(text) {
     var box = document.getElementById('bootError');
     if (!box) { document.addEventListener('DOMContentLoaded', function () { show(text); }); return; }
@@ -24,39 +30,51 @@
     box.hidden = false;
     box.querySelector('span').textContent = text;
   }
-  // Every file the game is made of, simplest first, so the first one that will not
-  // import is the culprit rather than something that merely depends on it.
-  var FILES = ['vendor/three.module.min.js', 'src/noise.js', 'src/terrain.js', 'src/skier.js',
-    'src/sim.js', 'src/input.js', 'src/hud.js', 'src/render/geom.js', 'src/render/rider.js',
-    'src/render/grooves.js', 'src/render/snow.js', 'src/render/world.js', 'src/render/view.js', 'src/main.js'];
-  function diagnose(first) {
-    var sw = navigator.serviceWorker && navigator.serviceWorker.controller ? ' [sw]' : '';
-    var i = 0;
-    (function next() {
-      if (i >= FILES.length) { if (!window.copycats) show(first + ' — every file loads on its own now; try Reload.' + sw); return; }
-      var f = FILES[i++];
-      import('./' + f).then(next, function (err) {
-        var why = (err && (err.name + ': ' + err.message)) || String(err);
-        fetch(f, { cache: 'no-store' }).then(function (r) {
-          show(first + ' — ' + f + ' fails: ' + why + ' (HTTP ' + r.status + ', ' +
-            (r.headers.get('content-type') || 'no type') + ')' + sw);
-        }, function (e2) {
-          show(first + ' — ' + f + ' cannot be fetched at all (' + ((e2 && e2.message) || e2) +
-            '). A content or ad blocker may be blocking it.' + sw);
+  function short(url) { return url.split('?')[0].split('/').slice(-2).join('/'); }
+
+  /* Load src/main.js and everything it imports as data, wired together by blob URLs. */
+  function viaBlobs() {
+    var built = {};
+    function build(url) {
+      if (built[url]) return built[url];
+      built[url] = fetch(url, { cache: 'no-cache' }).then(function (r) {
+        if (!r.ok) throw new Error(short(url) + ' HTTP ' + r.status);
+        return r.text();
+      }).then(function (src) {
+        var re = /(\bfrom\s*|\bimport\s*\(?\s*)(['"])(\.\.?\/[^'"]+)\2/g, deps = [], m;
+        while ((m = re.exec(src))) if (deps.indexOf(m[3]) < 0) deps.push(m[3]);
+        return Promise.all(deps.map(function (d) { return build(new URL(d, url).href); })).then(function (blobs) {
+          deps.forEach(function (d, i) {
+            src = src.split("'" + d + "'").join("'" + blobs[i] + "'").split('"' + d + '"').join('"' + blobs[i] + '"');
+          });
+          return URL.createObjectURL(new Blob([src + '\n//# sourceURL=' + url], { type: 'text/javascript' }));
         });
       });
-    })();
+      return built[url];
+    }
+    return build(new URL('src/main.js', location.href).href).then(function (u) { return import(u); });
   }
+
+  function rescue(first) {
+    if (rescuing || window.copycats) return;
+    rescuing = true;
+    viaBlobs().then(function () {
+      if (!window.copycats) show(first + ' — and the game still did not start.');
+    }, function (err) {
+      show(first + ' — backup loader failed too: ' + ((err && (err.name + ': ' + err.message)) || err));
+    });
+  }
+
   window.addEventListener('error', function (e) {
     var t = e.target;
-    if (t && t !== window && (t.src || t.href)) diagnose('Could not load ' + (t.src || t.href).split('/').slice(-2).join('/'));
-    else if (e.message) show(e.message + (e.filename ? ' (' + e.filename.split('/').pop() + ':' + e.lineno + ')' : ''));
+    if (t && t !== window && (t.src || t.href)) rescue('Could not load ' + short(t.src || t.href));
+    else if (e.message) show(e.message + (e.filename ? ' (' + short(e.filename) + ':' + e.lineno + ')' : ''));
   }, true);
   window.addEventListener('unhandledrejection', function (e) {
     show(String((e.reason && e.reason.message) || e.reason));
   });
   window.addEventListener('load', function () {
-    setTimeout(function () { if (!window.copycats) diagnose('The game did not start'); }, 2000);
+    setTimeout(function () { if (!window.copycats) rescue('The game did not start'); }, 1500);
   });
   window.repairAndReload = function () {
     var jobs = [];
