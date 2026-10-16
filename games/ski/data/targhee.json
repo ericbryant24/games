@@ -1,0 +1,37 @@
+{
+  "name": "Grand Targhee",
+  "origin": {
+    "lat": 43.785,
+    "lon": -110.94
+  },
+  "cell": 5,
+  "x0": -3615,
+  "z0": -2550,
+  "width": 1333,
+  "height": 1020,
+  "baseHeight": 2200,
+  "sources": [
+    "AWS Terrain Tiles (USGS 3DEP elevation)",
+    "ESA WorldCover 2021 (10 m land cover)"
+  ],
+  "places": {
+    "fred": {
+      "name": "Fred's Mountain summit",
+      "x": 1360,
+      "z": 810,
+      "elevation": 3025
+    },
+    "peaked": {
+      "name": "Peaked Mountain summit",
+      "x": 485,
+      "z": -215,
+      "elevation": 3015
+    },
+    "base": {
+      "name": "Base area",
+      "x": -1455,
+      "z": -233,
+      "elevation": 2415
+    }
+  }
+}

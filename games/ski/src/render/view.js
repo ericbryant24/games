@@ -5,6 +5,7 @@
 
 import * as THREE from '../../vendor/three.module.min.js';
 import { World } from './world.js';
+import { TileWorld } from './tiles.js';
 import { RiderMesh, OUTFITS } from './rider.js';
 import { Tracks } from './grooves.js';
 import { Snow, Flakes } from './powder.js';
@@ -33,9 +34,8 @@ function blobTexture() {
   return t;
 }
 function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
+function wrap(a) { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI) a += 2 * Math.PI; return a; }
 const SUN_DIR = new THREE.Vector3(-0.72, 0.46, 0.52).normalize();
-const LIGHT_U = new THREE.Vector3(0, 1, 0).cross(SUN_DIR).normalize();
-const LIGHT_W = SUN_DIR.clone().cross(LIGHT_U).normalize();
 
 export class View {
   constructor(canvas, sim, opts = {}) {
@@ -65,8 +65,15 @@ export class View {
 
     // Bright sun, and a sky that fills the shadows with blue — the look of a clear day
     // on snow.
-    this.sun = new THREE.DirectionalLight(0xfff0d8, 2.7);
-    this.hemi = new THREE.HemisphereLight(0x9cc0f4, 0x6b7c9c, 0.85);
+    // On the endless run the sun rakes low across the fall line. A real mountain has
+    // slopes facing every way, so there it is a high midday sun from the south-south-
+    // west, with more sky light filling the faces turned away from it.
+    const mtn = !!sim.terrain.isMountain;
+    this.sunDir = mtn ? new THREE.Vector3(-0.3, 0.72, 0.62).normalize() : SUN_DIR.clone();
+    this.lightU = new THREE.Vector3(0, 1, 0).cross(this.sunDir).normalize();
+    this.lightW = this.sunDir.clone().cross(this.lightU).normalize();
+    this.sun = new THREE.DirectionalLight(0xfff0d8, mtn ? 2.4 : 2.7);
+    this.hemi = new THREE.HemisphereLight(0x9cc0f4, 0x6b7c9c, mtn ? 1.15 : 0.85);
     this.scene.add(this.sun, this.sun.target, this.hemi);
     if (q.shadow) {
       this.sun.castShadow = true;
@@ -78,9 +85,11 @@ export class View {
     }
 
     this.sky = makeSky();
+    this.sky.material.uniforms.uSun.value = this.sunDir;
     this.scene.add(this.sky);
 
-    this.world = new World(sim.terrain, { dx: q.dx, dz: q.dz, treeDetail: q.tree });
+    const W = sim.terrain.isMountain ? TileWorld : World;
+    this.world = new W(sim.terrain, { dx: q.dx, dz: q.dz, treeDetail: q.tree });
     this.scene.add(this.world.root);
 
     this.riderMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.62, metalness: 0 });
@@ -109,7 +118,7 @@ export class View {
     this.shake = 0;
     this._v = new THREE.Vector3();
     this.resize();
-    this.world.update(sim.player.z, 80, q.ahead, true);
+    this._worldUpdate(sim.player, true);
     this.snapCamera();
   }
 
@@ -122,43 +131,62 @@ export class View {
     this.camera.updateProjectionMatrix();
   }
 
-  /* Where the camera wants to be for the player's current (blended) pose. */
+  _worldUpdate(p, all = false) {
+    if (this.world.isTiles) this.world.update(p.x, p.z, all);
+    else this.world.update(p.z, 80, this.q.ahead, all);
+  }
+
+  /* Which way the camera should face. On the endless run, straight down it. On a real
+     mountain, mostly down the fall line where you are — judged over a wide patch, so it
+     follows the mountain rather than every turn — and partly the way you are going. */
+  _yawTarget() {
+    const T = this.sim.terrain, p = this.sim.player, at = this.at;
+    if (!T.isMountain) return 0;
+    let dx = 0, dz = 0;
+    const down = T.downhill(at.x, at.z, 30);
+    if (down !== null) { dx += Math.sin(down) * 0.65; dz += Math.cos(down) * 0.65; }
+    const v = Math.hypot(p.vx, p.vz);
+    if (v > 3) { dx += p.vx / v * 0.35; dz += p.vz / v * 0.35; }
+    if (Math.abs(dx) + Math.abs(dz) < 1e-3) return this.yaw ?? 0;
+    return Math.atan2(dx, dz);
+  }
+
+  /* Where the camera wants to be: behind you and up the hill along its heading, on a
+     long lens like GMA's — you just below the middle of the screen, the three chasing
+     you beneath, the hill ahead filling the top. Set against the slope itself so steep
+     and gentle pitches frame the same. */
   _target(out, look) {
-    const p = this.at, T = this.sim.terrain;
+    const T = this.sim.terrain;
     const v = Math.min(30, this.sim.player.speed);
     const portrait = this.camera.aspect < 1;
-    const x = this.camX;
-    if (this.mode === 'reverse') {
-      // Down the hill, looking back up at you coming towards it: the faces of drops and
-      // jumps face the lens, the three chasing you are above you on screen, and about
-      // thirty-five metres of the hill ahead fill the screen below you. The angle is
-      // set against the slope itself so steep and gentle pitches frame the same.
-      // A long lens from a long way off, like GMA: flat, almost isometric perspective,
-      // so the riders stay a readable size and the hill does not bend away.
-      const A = (portrait ? 8 : 6) + v * 0.1;
-      const dist = (portrait ? 100 : 84) + v * 0.9;
-      const e = (portrait ? 1.13 : 1.0) - Math.atan(this.fall);
-      const tz = p.z + A;
-      const ty = T.height(x + (p.x - x) * 0.7, tz);
-      look.set(x + (p.x - x) * 0.7, ty, tz);
-      out.set(x, ty + Math.sin(e) * dist, tz + Math.cos(e) * dist);
-      return;
-    }
-    // Behind, up the hill, on a long lens like GMA's: you just below the middle of the
-    // screen, the three chasing you beneath, and the hill ahead filling the top. Set
-    // against the slope itself so steep and gentle pitches frame the same.
+    const fx = Math.sin(this.yaw), fz = Math.cos(this.yaw);
     const A = (portrait ? 6 : 8) + v * 0.15;
     const dist = (portrait ? 62 : 56) + v * 0.8;
     const e = (portrait ? 0.52 : 0.42) + Math.atan(this.fall);
-    const lx = x + (p.x - x) * 0.7, tz = p.z + A, ty = T.height(lx, tz);
-    look.set(lx, ty, tz);
-    out.set(x, ty + Math.sin(e) * dist, tz - Math.cos(e) * dist);
+    const lx = this.anchor.x + fx * A, lz = this.anchor.z + fz * A, ty = T.height(lx, lz);
+    look.set(lx, ty, lz);
+    out.set(lx - fx * Math.cos(e) * dist, ty + Math.sin(e) * dist, lz - fz * Math.cos(e) * dist);
   }
 
-  /* The pitch of the hill around you, smoothed: rise over run down the fall line. */
-  _fall(z, x) {
+  /* The pitch of the hill around you along the camera's heading, rise over run. */
+  _fall(x, z) {
     const T = this.sim.terrain;
+    if (T.isMountain) return T.fallAlong(x, z, this.yaw);
     return Math.max(0.05, (T.height(x, z - 10) - T.height(x, z + 30)) / 40);
+  }
+
+  /* Move the anchor the camera hangs from: exactly with you along the camera's heading
+     (lag there reads as judder), on a stiff spring across it. */
+  _follow(dt) {
+    const p = this.sim.player, at = this.at;
+    const fx = Math.sin(this.yaw), fz = Math.cos(this.yaw), rx = -fz, rz = fx;
+    const along = at.x * fx + at.z * fz;
+    let lat = this.anchor.x * rx + this.anchor.z * rz;
+    const want = at.x * rx + at.z * rz + clamp((p.vx * rx + p.vz * rz) * 0.15, -2, 2);
+    this.latV = (this.latV || 0) + ((want - lat) * 30 - (this.latV || 0) * 11) * dt;
+    lat += this.latV * dt;
+    this.anchor.x = fx * along + rx * lat;
+    this.anchor.z = fz * along + rz * lat;
   }
 
   /* Field of view for the current camera, shape of screen and speed. */
@@ -174,8 +202,10 @@ export class View {
     this.camera.fov = this._fov();
     this.camera.updateProjectionMatrix();
     this.at = p.pose(1, this.at || {});
-    this.camX = p.x;
-    this.fall = this._fall(p.z, p.x);
+    this.yaw = this._yawTarget();
+    this.anchor = { x: this.at.x, z: this.at.z };
+    this.latV = 0;
+    this.fall = this._fall(p.x, p.z);
     this._target(this.cam, this.look);
     this.camera.position.copy(this.cam);
     this.camera.lookAt(this.look);
@@ -184,7 +214,7 @@ export class View {
   update(dt) {
     const sim = this.sim, p = sim.player;
     const a = sim.alpha;
-    this.world.update(p.z, 80, this.q.ahead);
+    this._worldUpdate(p);
 
     for (const e of this.riders) {
       e.at = e.r.pose(a, e.at || {});
@@ -203,10 +233,10 @@ export class View {
     // where you are heading, and rises and falls slowly so bumps never make it bob.
     // Down the hill it keeps exact pace, or you would shudder.
     const k = 1 - Math.exp(-dt * 2.4);
-    const lead = clamp(p.vx * 0.15, -2, 2);
-    this.camVX = (this.camVX || 0) + ((this.at.x + lead - this.camX) * 30 - (this.camVX || 0) * 11) * dt;
-    this.camX += this.camVX * dt;
-    this.fall += (this._fall(this.at.z, this.camX) - this.fall) * (1 - Math.exp(-dt * 0.6));
+    // Turn with the mountain slowly, so the view never swings with each carve.
+    this.yaw += wrap(this._yawTarget() - this.yaw) * (1 - Math.exp(-dt * 0.9));
+    this._follow(dt);
+    this.fall += (this._fall(this.anchor.x, this.anchor.z) - this.fall) * (1 - Math.exp(-dt * 0.6));
     const want = this._v;
     const look = this._look || (this._look = new THREE.Vector3());
     this._target(want, look);
@@ -232,17 +262,17 @@ export class View {
     // The sun's shadow box rides along with you, snapped to whole shadow-map texels in
     // the light's own frame so shadow edges do not crawl as you move.
     const c = this._sv || (this._sv = new THREE.Vector3());
-    c.set(this.at.x, this.at.y, this.at.z + 10);
+    c.set(this.at.x + Math.sin(this.yaw) * 10, this.at.y, this.at.z + Math.cos(this.yaw) * 10);
     if (this.q.shadow) {
       const texel = (this.sun.shadow.camera.right - this.sun.shadow.camera.left) / this.q.shadow;
-      const u = c.dot(LIGHT_U), w = c.dot(LIGHT_W), d = c.dot(SUN_DIR);
+      const u = c.dot(this.lightU), w = c.dot(this.lightW), d = c.dot(this.sunDir);
       const su = Math.round(u / texel) * texel, sw = Math.round(w / texel) * texel;
-      c.copy(LIGHT_U).multiplyScalar(su).addScaledVector(LIGHT_W, sw).addScaledVector(SUN_DIR, d);
+      c.copy(this.lightU).multiplyScalar(su).addScaledVector(this.lightW, sw).addScaledVector(this.sunDir, d);
     }
-    this.sun.position.copy(c).addScaledVector(SUN_DIR, 120);
+    this.sun.position.copy(c).addScaledVector(this.sunDir, 120);
     this.sun.target.position.copy(c);
     this.sky.position.copy(this.camera.position);
-    if (this.flakes) this.flakes.update(dt, this.cam.x, this.at.y + 8, this.at.z + 6);
+    if (this.flakes) this.flakes.update(dt, this.at.x + Math.sin(this.yaw) * 6, this.at.y + 8, this.at.z + Math.cos(this.yaw) * 6);
   }
 
   /* A soft shadow pooled on the snow right under each rider — it is what makes them

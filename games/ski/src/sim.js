@@ -91,16 +91,21 @@ export function trickName(t) {
 export class Sim {
   constructor(opts = {}) {
     this.seed = opts.seed ?? 1;
-    this.terrain = new Terrain(this.seed);
+    // The endless generated run, or a real mountain handed in ready-loaded.
+    this.terrain = opts.terrain || new Terrain(this.seed);
     const T = this.terrain;
-    const x0 = T.centre(0);
+    // Where you start and which way you face: the top of the endless run facing down
+    // it, or a chosen spot on the mountain facing down the fall line.
+    const st = opts.start || { x: T.centre(0), z: 0, psi: 0 };
+    const fx = Math.sin(st.psi), fz = Math.cos(st.psi), rx = -fz, rz = fx;
     const me = character(opts.character);
     const spec = me.kind === 'board' ? RIDER.playerBoard : RIDER.player;
-    this.player = new Skier(spec, { name: me.name, isPlayer: true, x: x0, z: 0, terrain: T });
+    this.player = new Skier(spec, { name: me.name, isPlayer: true, x: st.x, z: st.z, psi: st.psi, terrain: T });
     this.player.outfit = me.outfit;
     this.roster = opts.roster || rollChasers(this.seed, me.name);
     this.chasers = this.roster.map((c, i) => {
-      const sk = new Skier(c.spec, { name: c.name, x: x0 + (i - 1) * 1.6, z: -c.gap, terrain: T });
+      const sk = new Skier(c.spec, { name: c.name, x: st.x - fx * c.gap + rx * (i - 1) * 1.6,
+        z: st.z - fz * c.gap + rz * (i - 1) * 1.6, psi: st.psi, terrain: T });
       sk.cfg = c;
       sk.outfit = c.outfit;
       return { skier: sk, cfg: c, idx: 0, crashTime: null, wasAir: false, copy: 0,
@@ -108,12 +113,15 @@ export class Sim {
     });
     this.tricks = new Map();      // your take-off number → the trick you landed
     this.riders = [this.player, ...this.chasers.map(c => c.skier)];
+    // On a mountain, reaching the base area ends the chase.
+    this.goal = T.isMountain && T.places.base ? { x: T.places.base.x, z: T.places.base.z, r: 140 } : null;
 
     // Your line, as breadcrumbs. Seeded with the run-in so they have something to follow.
     this.trail = [];
     this.trailBase = 0;           // breadcrumbs dropped off the front of the array
-    for (let z = -26; z <= 0; z += TRAIL_STEP) {
-      this.trail.push({ x: x0, y: T.height(x0, z), z, s: z + 26, jump: false, air: 0, v: 0 });
+    for (let d = -26; d <= 0; d += TRAIL_STEP) {
+      const x = st.x + fx * d, z = st.z + fz * d;
+      this.trail.push({ x, y: T.height(x, z), z, s: d + 26, jump: false, air: 0, v: 0 });
     }
     this.playerS = 26;
 
@@ -177,7 +185,15 @@ export class Sim {
     for (const c of this.chasers) if (c.lives > 0) back = Math.min(back, c.skier.z);
     T.prune(back - 90);
     this._trimTrail();
-    this.distance = Math.max(this.distance, p.z);
+    this.distance = this.terrain.isMountain ? this.playerS - 26 : Math.max(this.distance, p.z);
+    if (this.terrain.contain) for (const r of this.riders) this.terrain.contain(r);
+    // Down at the base with chasers still on your tail: this run is over.
+    if (this.goal && this.phase === 'run' && !p.crashed &&
+        Math.hypot(p.x - this.goal.x, p.z - this.goal.z) < this.goal.r) {
+      this.phase = 'down';
+      this.endTime = this.runTime;
+      this.events.push({ type: 'down', time: this.runTime, left: this.remaining });
+    }
 
     // Who went down this step?
     if (p.crashed && !wasCrashed) {

@@ -35,7 +35,7 @@ const GAMES = [
   {
     title: 'Copycats',
     href: 'games/ski/',
-    blurb: 'An endless downhill ski chase. Three riders copy your every line, jump and trick — skim the trees, hit the drops and spin until they crash.',
+    blurb: 'A downhill ski chase, endless or on the real Grand Targhee. Three riders copy your every line, jump and trick — skim the trees, hit the drops and spin until they crash.',
     tags: ['Skiing', 'Endless', 'Portrait', '3D'],
     art: `
       <defs>

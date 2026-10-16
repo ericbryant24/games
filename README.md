@@ -69,6 +69,11 @@ long it took. Crash yourself and they win.
 - **Endless terrain.** A meandering run between forest walls, built a segment at a time
   from a seed: cliff bands with rollovers either side, kickers with a dye line on the lip,
   rollers, mogul fields, tree islands, gates of trees to thread and rock gardens.
+- **Grand Targhee.** Besides the endless generated run, you can ride the real mountain:
+  the terrain is USGS elevation data and the forest is ESA land cover, so the slopes,
+  gullies, open bowls and timber are where they are on Fred's and Peaked. Start from
+  either summit; the camera turns to face down whichever slope you are on, and reaching
+  the base area finishes the run. `tools/targhee/` builds the map.
 - **A long-lens camera behind you**, Grand Mountain Adventure style: flat, almost
   isometric, you just below the middle of the screen with the chasers beneath and the
   hill ahead filling the top. Graphics always run at the highest setting.
@@ -101,14 +106,17 @@ games/sailing/
 games/ski/
   src/
     terrain.js        the endless mountain: heights, features, trees and rocks
+    mountain.js       a real mountain from data: heights, forest, trees, fall line
     skier.js          one rider's physics — carving, skidding, air, landings
     sim.js            the chase, headless: your line, the chasers' brains, the rules
     input.js          one-thumb drag controls, and the keyboard
     hud.js            clock, chasers, name tags, messages
     main.js           menu, character picker, countdown, results, scoreboard
-    render/           mountain chunks, riders, ski tracks, snow spray, camera
+    render/           mountain chunks and tiles, riders, ski tracks, snow spray, camera
+  data/               targhee.png and .json: the Grand Targhee map
   vendor/             three.js r160 again, so each game stands alone
 tools/                headless test harnesses — see tools/README.md
+tools/targhee/        builds the Grand Targhee map from public elevation and land cover
 ```
 
 `sim.js` deliberately knows nothing about rendering, which is what lets the whole race

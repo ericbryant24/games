@@ -7,6 +7,7 @@ import { View } from './render/view.js';
 import { OUTFITS } from './render/rider.js';
 import { Hud, fmt } from './hud.js';
 import { Controls } from './input.js';
+import { loadMountain } from './mountain.js';
 
 const el = id => document.getElementById(id);
 const scene = el('scene');
@@ -15,7 +16,7 @@ const COLORS = OUTFITS.map(o => '#' + o.jacket.toString(16).padStart(6, '0'));
 const SETTINGS_KEY = 'copycats.settings.v1';
 const SCORES_KEY = 'copycats.scores.v1';
 
-let settings = { character: 'Eric', ...load(SETTINGS_KEY, {}) };
+let settings = { character: 'Eric', map: 'endless', place: 'fred', ...load(SETTINGS_KEY, {}) };
 let scores = load(SCORES_KEY, []);
 let sim = null, view = null, hud = null;
 const controls = new Controls().attach(el('surface'));
@@ -48,6 +49,34 @@ for (const seg of document.querySelectorAll('.seg')) {
   }
 }
 
+/* Grand Targhee: the start places come from the map's own data; the mountain itself
+   (about 1.5 MB) loads only when you first drop in on it, then stays loaded. */
+const MAP_BASE = 'data/targhee';
+let mountain = null;
+function showPlaces() {
+  const on = settings.map === 'targhee';
+  el('placeField').hidden = !on;
+  if (!on || el('places').childElementCount) return;
+  fetch(MAP_BASE + '.json', { cache: 'no-cache' }).then(r => r.json()).then(meta => {
+    const spots = Object.entries(meta.places).filter(([k]) => k !== 'base');
+    if (!spots.some(([k]) => k === settings.place)) settings.place = spots[0][0];
+    el('places').innerHTML = spots.map(([k, p]) =>
+      `<button data-v="${k}" class="${k === settings.place ? 'on' : ''}">${p.name}<em>${Math.round(p.elevation * 3.281).toLocaleString()} ft</em></button>`).join('');
+    for (const b of el('places').querySelectorAll('button')) {
+      b.addEventListener('click', () => {
+        for (const o of el('places').querySelectorAll('button')) o.classList.remove('on');
+        b.classList.add('on');
+        settings.place = b.dataset.v;
+        save(SETTINGS_KEY, settings);
+      });
+    }
+    el('mapNote').textContent = 'The real mountain, from USGS elevation and ESA land-cover data. ' +
+      'Reach the base area to finish a run.';
+  }).catch(() => { el('mapNote').textContent = 'Could not load the mountain.'; });
+}
+for (const b of document.querySelectorAll('[data-opt="map"] button')) b.addEventListener('click', () => setTimeout(showPlaces));
+showPlaces();
+
 function playerName() { return character(settings.character).name; }
 function best() { return scores.length ? scores[0].time : 0; }
 
@@ -65,19 +94,23 @@ function start() {
   el('results').classList.add('hidden');
   el('paused').classList.add('hidden');
   el('loading').classList.remove('hidden');
-  requestAnimationFrame(() => requestAnimationFrame(() => {
-    try { build(); } catch (err) { fail(err); return; }
+  const ready = settings.map === 'targhee'
+    ? (mountain ? Promise.resolve(mountain) : loadMountain(MAP_BASE, 7).then(m => (mountain = m)))
+    : Promise.resolve(null);
+  ready.then(T => requestAnimationFrame(() => requestAnimationFrame(() => {
+    try { build(T); } catch (err) { fail(err); return; }
     el('loading').classList.add('hidden');
     el('menuBtn').hidden = false;
     cancelAnimationFrame(raf);
     last = performance.now();
     raf = requestAnimationFrame(frame);
-  }));
+  }))).catch(fail);
 }
 
-function build() {
+function build(T) {
   if (view) { view.dispose(); view = null; }
-  sim = new Sim({ seed: Math.floor(Math.random() * 1e9), character: playerName(), countdown: 4 });
+  sim = new Sim({ seed: Math.floor(Math.random() * 1e9), character: playerName(), countdown: 4,
+    terrain: T || undefined, start: T ? T.start(settings.place) : undefined });
   view = new View(scene, sim, { quality: 'high', camera: 'chase' });
   hud = hud || new Hud(el('hud'));
   hud.msgs = []; hud.pop = null;
@@ -201,6 +234,10 @@ function onEvent(e) {
     case 'lost':
       endAt = performance.now() + 2400;
       break;
+    case 'down':
+      hud.message('Made it to the base!', 'big', 3.2, e.left ? `${e.left} still on your tail` : 'and lost them all');
+      endAt = performance.now() + 2600;
+      break;
   }
 }
 
@@ -236,16 +273,18 @@ function results() {
     rank = scores.indexOf(entry);
     save(SCORES_KEY, scores);
   }
-  const shaken = sim.chasers.filter(c => c.skier.crashed && c.crashTime !== null && (won || c.crashTime <= t)).length;
+  const shaken = sim.chasers.filter(c => c.lives === 0 && c.crashTime !== null && c.crashTime <= t + 0.01).length;
+  const madeIt = sim.phase === 'down';
   el('resultTitle').innerHTML = won
     ? `Lost them in ${fmt(t)}${rank === 0 ? '<span class="badge">Best</span>' : ''}`
-    : 'They got you';
+    : madeIt ? 'Made it to the base' : 'They got you';
   el('resultSub').textContent = won
     ? (rank >= 0 ? `#${rank + 1} on your scoreboard. ` : '') + `${Math.round(sim.distance)} m of mountain.`
+    : madeIt ? `${fmt(t)} and ${Math.round(sim.distance).toLocaleString()} m down the mountain, with ${shaken} of 3 shaken off.`
     : `You ${cause({ cause: sim.player.cause, by: sim.player.causeBy }, true)} after ${fmt(t)}, ` +
       `with ${shaken} of 3 shaken off.`;
   el('resultList').innerHTML = sim.chasers.map((c, i) => {
-    const down = c.crashTime !== null && (won || c.crashTime <= t);
+    const down = c.crashTime !== null && (won || madeIt || c.crashTime <= t);
     return `<li class="${down ? '' : 'up'}"><span class="dot" style="background:${COLORS[c.cfg.outfit]}"></span>
       <span class="nm">${c.cfg.name}</span>
       <span class="cs">${down ? cause({ cause: c.skier.cause, by: c.skier.causeBy, trick: '' }, false) : 'still on your tail'}</span>
