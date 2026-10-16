@@ -23,13 +23,13 @@ export const RADIUS = 0.32;
    flip    somersault rate in the air, rad/s
    pop     ollie, m/s */
 export const RIDER = {
-  player: { kind: 'ski', carve: 13, yaw: 3.1, grip: 7.5, drag: 0.0068, tuckDrag: 0.0038,
+  player: { kind: 'ski', carve: 22, yaw: 4.4, grip: 12, drag: 0.0068, tuckDrag: 0.0038,
     land: 10.5, align: 0.95, spin: 5.2, flip: 5.0, pop: 3.8 },
-  ski: { kind: 'ski', carve: 13, yaw: 3.1, grip: 7.5, drag: 0.0068, tuckDrag: 0.0038,
+  ski: { kind: 'ski', carve: 22, yaw: 4.4, grip: 12, drag: 0.0068, tuckDrag: 0.0038,
     land: 9.0, align: 0.8, spin: 5.0, flip: 4.8, pop: 3.8 },
-  playerBoard: { kind: 'board', carve: 11.5, yaw: 2.7, grip: 7, drag: 0.0070, tuckDrag: 0.0040,
+  playerBoard: { kind: 'board', carve: 20, yaw: 4.0, grip: 11, drag: 0.0070, tuckDrag: 0.0040,
     land: 11.5, align: 0.95, spin: 5.2, flip: 5.0, pop: 3.9 },
-  board: { kind: 'board', carve: 10.5, yaw: 2.4, grip: 6.5, drag: 0.0070, tuckDrag: 0.0042,
+  board: { kind: 'board', carve: 19, yaw: 3.8, grip: 10, drag: 0.0070, tuckDrag: 0.0042,
     land: 10.5, align: 0.95, spin: 4.6, flip: 4.6, pop: 3.9 }
 };
 
@@ -58,6 +58,7 @@ export class Skier {
     this.brake = 0;        // 0..1
     this.wantJump = false;
     this.flipIn = 0;       // in the air: -1 backflip .. 1 front flip
+    this.skating = 0;      // seconds of skating left to show
     this.boost = 0;        // catch-up push, m/s² (followers only)
 
     // What the renderer and the HUD want to know.
@@ -121,8 +122,8 @@ export class Skier {
     vx -= vn * n.x; vy -= vn * n.y; vz -= vn * n.z;
     let speed = Math.hypot(vx, vy, vz);
 
-    // Swing the skis. Fast at walking pace, much slower at speed, slower still tucked.
-    const yawRate = s.yaw * clamp(10 / (speed + 4), 0.32, 1) * (this.tuck ? 0.6 : 1);
+    // Swing the skis: quick and nimble, a little less so at full speed or tucked.
+    const yawRate = s.yaw * clamp(16 / (speed + 6), 0.5, 1) * (this.tuck ? 0.7 : 1);
     this.psi = wrapAngle(this.psi - this.steer * yawRate * dt);
 
     // Ski direction and its sideways partner, both in the plane of the snow.
@@ -149,10 +150,13 @@ export class Skier {
       along = speed * Math.cos(b2);
       side = speed * Math.sin(b2);
       lean = -(turn / dt) * speed / G;
-      // Whatever is still sideways skids, and skidding costs speed.
+      // Whatever is still sideways skids. Skidding costs some speed, but the edges
+      // push a share of it back along the skis, so a quick turn does not stall you.
       const keep = Math.exp(-s.grip * dt);
-      skid = Math.abs(side) * (1 - keep) / dt;
+      const scrub = Math.abs(side) * (1 - keep);
+      skid = scrub / dt;
       side *= keep;
+      along += scrub * 0.45;
       along *= back;
     }
     vx = fx * along + lx * side;
@@ -171,6 +175,8 @@ export class Skier {
     // A skate step or two when nearly stopped, so nobody is stranded on a flat.
     const push = (speed < 3 && !this.brake ? 1.8 : 0) + this.boost;
     if (push) { vx += fx * push * dt; vy += fy * push * dt; vz += fz * push * dt; }
+    if (speed < 3 && !this.brake) this.skating = Math.max(this.skating, 0.3);
+    this.skating = Math.max(0, this.skating - dt);
 
     this.skid = clamp((skid / 14) + this.brake * Math.min(1, speed / 6), 0, 1);
     this.lean += (clamp(lean, -1.2, 1.2) - this.lean) * Math.min(1, dt * 10);
@@ -203,7 +209,8 @@ export class Skier {
       const d2 = (hf - 2 * h + hb) / (e * e);
       const kappa = d2 / Math.pow(1 + d1 * d1, 1.5);
       const support = G * n.y + this.speed * this.speed * kappa;
-      if (support < 0 || yFree - h > 0.12) {
+      // Only a real lip throws you: rolls and bumps you ride over, knees soaking them up.
+      if (support < -0.3 * G || yFree - h > 0.3) {
         this.y = Math.max(yFree, h);
         this._launch(vx, vy, vz);
         return;

@@ -53,11 +53,11 @@ export function rollChasers(seed, you = 'Eric') {
     a[weak[i]] = r() * 0.18;
     a[strongPick] = 0.82 + r() * 0.18;
     const base = RIDER[kind];
-    const trick = 0.6 + 0.6 * a.tricks;
+    const trick = 0.75 + 0.5 * a.tricks;
     const spec = {
       ...base,
-      land: 7.0 + 4.2 * a.landing + (kind === 'board' ? 0.8 : 0),
-      align: 0.6 + 0.35 * a.landing,
+      land: 8.6 + 3.4 * a.landing + (kind === 'board' ? 0.8 : 0),
+      align: 0.7 + 0.3 * a.landing,
       spin: RIDER.player.spin * trick,
       flip: RIDER.player.flip * trick,
       carve: base.carve - 2 + 3.4 * a.carving,
@@ -66,9 +66,9 @@ export function rollChasers(seed, you = 'Eric') {
     return {
       name: who.name, kind, outfit: who.outfit, spec, abilities: a,
       gap: GAPS[i],
-      look: 0.74 - 0.44 * a.line,
-      react: 0.30 + 0.32 * a.eyes,
-      aware: 0.5 + 0.5 * a.eyes,
+      look: 0.5 - 0.3 * a.line,
+      react: 0.5 + 0.35 * a.eyes,
+      aware: 0.8 + 0.25 * a.eyes,
       blurb: `${STRONG[strongPick]}, ${WEAK[weak[i]]}`
     };
   });
@@ -110,7 +110,7 @@ export class Sim {
     this.trail = [];
     this.trailBase = 0;           // breadcrumbs dropped off the front of the array
     for (let z = -26; z <= 0; z += TRAIL_STEP) {
-      this.trail.push({ x: x0, y: T.height(x0, z), z, s: z + 26, jump: false, air: 0 });
+      this.trail.push({ x: x0, y: T.height(x0, z), z, s: z + 26, jump: false, air: 0, v: 0 });
     }
     this.playerS = 26;
 
@@ -207,7 +207,7 @@ export class Sim {
     if (d < TRAIL_STEP) return;
     this.playerS = last.s + d;
     this.trail.push({ x: p.x, y: p.y, z: p.z, s: this.playerS, jump: this._pendingJump,
-      air: p.air ? p.airId : 0 });
+      air: p.air ? p.airId : 0, v: p.speed });
     this._pendingJump = false;
   }
 
@@ -286,8 +286,16 @@ export class Sim {
     // Spacing: how far back along your line are they?
     const gap = this.playerS - tr[c.idx].s + Math.sqrt(bd) * 0.5;
     const err = gap - cfg.gap;
-    s.tuck = err > 3;
+    // They copy your speed as well as your line: going into a jump faster than you did
+    // is how you overshoot the landing. Only when well off the pace do they push harder.
+    const vYou = tr[c.idx].v ?? s.speed;
+    const behind = err > 7;
+    s.tuck = err > 3 && (behind || s.speed < vYou);
     s.brake = err < -1.5 ? clamp((-err - 1.5) / 5, 0, 1) : 0;
+    // Allowed a little over your speed in proportion to how far back they are, so they
+    // close the gap without ever flying a jump much faster than you did.
+    const cap = vYou * 1.04 + 0.6 + Math.max(0, err) * 0.18;
+    if (!behind && s.speed > cap) s.brake = Math.max(s.brake, clamp((s.speed - cap) / 5, 0, 0.8));
     if (toPlayer < 3.2) s.brake = 1;
     // Don't ride up the back of the one in front.
     for (const o of this.chasers) {
@@ -307,7 +315,7 @@ export class Sim {
   /* Steering correction away from whatever is in front of them that they have noticed. */
   _avoid(c, speed, aimErr) {
     const s = c.skier, cfg = c.cfg;
-    const R = clamp(cfg.react * speed, 3, 14) + 1.5;
+    const R = clamp(cfg.react * speed, 3, 18) + 1.5;
     const fx = Math.sin(s.psi), fz = Math.cos(s.psi);
     const rx = -fz, rz = fx;                       // to their right
     let push = 0;
@@ -316,7 +324,7 @@ export class Sim {
       const ahead = dx * fx + dz * fz;
       if (ahead <= 0 || ahead > R) return;
       const lat = dx * rx + dz * rz;
-      const room = or + RADIUS + 0.55;
+      const room = or + RADIUS + 0.8;
       if (Math.abs(lat) > room) return;
       const urgency = (1 - ahead / R) * (1 - 0.5 * Math.abs(lat) / room);
       // Straight at it: go round on the side they were turning to anyway.
@@ -325,7 +333,7 @@ export class Sim {
     };
     for (const o of this.terrain.nearby(s.x, s.z, R, this._near)) consider(o.x, o.z, o.r);
     for (const r of this.riders) if (r !== s && (r.crashed || !r.isPlayer)) consider(r.x, r.z, 0.6);
-    return clamp(push * cfg.aware * 2.6, -1.6, 1.6);
+    return clamp(push * cfg.aware * 3.2, -1.8, 1.8);
   }
 
   /* Riders running into each other, or into someone already on the ground. */
@@ -339,7 +347,13 @@ export class Sim {
         if (dx * dx + dz * dz > 0.8 * 0.8 || Math.abs(dy) > 1.3) continue;
         if (a.crashed) b.crash('wreck', a);
         else if (b.crashed) a.crash('wreck', b);
-        else { a.crash('collision', b); b.crash('collision', a); }
+        else {
+          // Two riders touching just jostle: shove apart and both lose some speed.
+          const d = Math.hypot(dx, dz) || 0.01, push = (0.8 - d) / 2 + 0.05;
+          a.x += dx / d * push; a.z += dz / d * push;
+          b.x -= dx / d * push; b.z -= dz / d * push;
+          for (const r of [a, b]) { r.vx *= 0.8; r.vz *= 0.8; r.vy *= 0.8; }
+        }
       }
     }
   }

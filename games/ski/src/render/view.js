@@ -17,7 +17,7 @@ export const QUALITY = {
 
 const HORIZON = new THREE.Color(0xdfeaf6);
 const ZENITH = new THREE.Color(0x5f9be0);
-const SUN_DIR = new THREE.Vector3(-0.62, 0.58, 0.30).normalize();
+const SUN_DIR = new THREE.Vector3(-0.72, 0.46, 0.52).normalize();
 const LIGHT_U = new THREE.Vector3(0, 1, 0).cross(SUN_DIR).normalize();
 const LIGHT_W = SUN_DIR.clone().cross(LIGHT_U).normalize();
 
@@ -33,7 +33,7 @@ export class View {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, q.pixel));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.3;
+    this.renderer.toneMappingExposure = 1.18;
     if (q.shadow) {
       this.renderer.shadowMap.enabled = true;
       this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -41,13 +41,16 @@ export class View {
 
     this.scene = new THREE.Scene();
     this.scene.background = HORIZON.clone();
-    this.scene.fog = new THREE.Fog(HORIZON.clone(), 110, q.ahead + 20);
-    this.camera = new THREE.PerspectiveCamera(50, 1, 0.5, 2500);
+    // The reverse camera sits a hundred metres off, so its haze starts further out.
+    this.scene.fog = this.mode === 'reverse'
+      ? new THREE.Fog(HORIZON.clone(), 160, 420)
+      : new THREE.Fog(HORIZON.clone(), 110, q.ahead + 20);
+    this.camera = new THREE.PerspectiveCamera(50, 1, this.mode === 'reverse' ? 4 : 0.5, 2500);
 
     // Bright sun, and a sky that fills the shadows with blue — the look of a clear day
     // on snow.
-    this.sun = new THREE.DirectionalLight(0xfff1dc, 1.9);
-    this.hemi = new THREE.HemisphereLight(0xa9c6f2, 0x7d88a0, 0.95);
+    this.sun = new THREE.DirectionalLight(0xfff0d8, 2.7);
+    this.hemi = new THREE.HemisphereLight(0x9cc0f4, 0x6b7c9c, 0.85);
     this.scene.add(this.sun, this.sun.target, this.hemi);
     if (q.shadow) {
       this.sun.castShadow = true;
@@ -70,7 +73,7 @@ export class View {
       const outfit = OUTFITS[(r.outfit ?? i) % OUTFITS.length];
       const mesh = new RiderMesh(kind, outfit, this.riderMat);
       // A touch larger than life, so you can read them from the camera's distance.
-      mesh.root.scale.setScalar(this.mode === 'reverse' ? 1.45 : 1.15);
+      mesh.root.scale.setScalar(this.mode === 'reverse' ? 1.6 : 1.15);
       const tracks = new Tracks(sim.terrain, kind);
       this.scene.add(mesh.root, tracks.mesh);
       return { r, mesh, tracks, color: outfit.jacket };
@@ -113,9 +116,11 @@ export class View {
       // jumps face the lens, the three chasing you are above you on screen, and about
       // thirty-five metres of the hill ahead fill the screen below you. The angle is
       // set against the slope itself so steep and gentle pitches frame the same.
-      const A = (portrait ? 8.5 : 6) + v * 0.1;
-      const dist = (portrait ? 54 : 46) + v * 0.55;
-      const e = (portrait ? 1.17 : 1.02) - Math.atan(this.fall);
+      // A long lens from a long way off, like GMA: flat, almost isometric perspective,
+      // so the riders stay a readable size and the hill does not bend away.
+      const A = (portrait ? 8 : 6) + v * 0.1;
+      const dist = (portrait ? 100 : 84) + v * 0.9;
+      const e = (portrait ? 1.13 : 1.0) - Math.atan(this.fall);
       const tz = p.z + A;
       const ty = T.height(x + (p.x - x) * 0.7, tz);
       look.set(x + (p.x - x) * 0.7, ty, tz);
@@ -137,8 +142,18 @@ export class View {
     return Math.max(0.05, (T.height(x, z - 10) - T.height(x, z + 30)) / 40);
   }
 
+  /* Field of view for the current camera, shape of screen and speed. */
+  _fov() {
+    const portrait = this.camera.aspect < 1, v = this.sim.player.speed;
+    return this.mode === 'reverse'
+      ? (portrait ? 30 : 24) + Math.min(2, v * 0.06)
+      : (portrait ? 62 : 48) + Math.min(8, v * 0.2);
+  }
+
   snapCamera() {
     const p = this.sim.player;
+    this.camera.fov = this._fov();
+    this.camera.updateProjectionMatrix();
     this.at = p.pose(1, this.at || {});
     this.camX = p.x;
     this.fall = this._fall(p.z, p.x);
@@ -160,6 +175,7 @@ export class View {
     }
     this.at = this.riders[0].at;
     this.snow.update(dt, this.h);
+    this.world.uniforms.uTime.value += dt;
 
     // The camera drifts across the hill after you, and is a touch springy vertically
     // so landings register. Down the hill it keeps exact pace, or you would shudder.
@@ -182,9 +198,7 @@ export class View {
     }
     this.camera.lookAt(this.look);
     const portrait = this.camera.aspect < 1;
-    const fov = this.mode === 'reverse'
-      ? (portrait ? 56 : 42) + Math.min(4, p.speed * 0.12)
-      : (portrait ? 62 : 48) + Math.min(8, p.speed * 0.2);
+    const fov = this._fov();
     if (Math.abs(fov - this.camera.fov) > 0.01) {
       this.camera.fov += (fov - this.camera.fov) * k;
       this.camera.updateProjectionMatrix();
@@ -216,16 +230,21 @@ export class View {
       return;
     }
     if (r.air) return;
+    // A fine powder trail off the skis whenever you are really moving.
+    if (r.speed > 9 && Math.random() < (r.speed - 9) * dt * 2.2) {
+      sn.emit(r.x - Math.sin(r.psi) * 0.6, r.y + 0.05, r.z - Math.cos(r.psi) * 0.6,
+        r.vx * 0.25, 0.5, r.vz * 0.25, 1, 0.5, 0.55, 0.7);
+    }
     const amount = r.skid * Math.min(1, r.speed / 8);
     if (amount < 0.06) return;
-    const n = amount * dt * 90;
+    const n = amount * dt * 170;
     const count = Math.floor(n) + (Math.random() < n % 1 ? 1 : 0);
     if (!count) return;
     // Out from the edges, to the outside of the turn.
     const side = r.lean > 0 ? 1 : -1;
     const rx = -Math.cos(r.psi) * side, rz = Math.sin(r.psi) * side;
     sn.emit(r.x + rx * 0.3, r.y + 0.05, r.z + rz * 0.3,
-      rx * 2.5 * amount + r.vx * 0.45, 1.6 * amount, rz * 2.5 * amount + r.vz * 0.45, count, 0.9, 0.45, 0.6);
+      rx * 3.2 * amount + r.vx * 0.45, 2.0 * amount, rz * 3.2 * amount + r.vz * 0.45, count, 1.1, 0.75, 0.75);
   }
 
   render() { this.renderer.render(this.scene, this.camera); }

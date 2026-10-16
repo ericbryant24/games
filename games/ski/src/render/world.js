@@ -15,6 +15,7 @@ const SHADE = new THREE.Color(0xa7b9d6);      // snow falling away from you
 const DYE = new THREE.Color(0x2f74e0);        // the blue line painted on a kicker's lip
 const CORNICE = new THREE.Color(0x93a6c4);    // the edge of a drop
 const HOLLOW = new THREE.Color(0x8fa5c8);     // shade round the foot of a tree
+const GROOMED = new THREE.Color(0xe9f0fa);    // the smoothed run-in of a kicker
 
 export class World {
   constructor(terrain, opts = {}) {
@@ -23,6 +24,23 @@ export class World {
     this.root = new THREE.Group();
     this.chunks = new Map();
     this.material = new THREE.MeshLambertMaterial({ vertexColors: true });
+    // Snow glitters: a scatter of tiny facets that catch the sun and twinkle as you move.
+    this.uniforms = { uTime: { value: 0 } };
+    this.material.onBeforeCompile = (sh) => {
+      sh.uniforms.uTime = this.uniforms.uTime;
+      sh.vertexShader = sh.vertexShader
+        .replace('#include <common>', '#include <common>\nvarying vec3 vSnowPos;')
+        .replace('#include <project_vertex>', '#include <project_vertex>\nvSnowPos = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+      sh.fragmentShader = sh.fragmentShader
+        .replace('#include <common>', '#include <common>\nvarying vec3 vSnowPos;\nuniform float uTime;')
+        .replace('#include <opaque_fragment>', `
+          vec3 cell = floor(vSnowPos * 7.0);
+          float hsh = fract(sin(dot(cell, vec3(12.9898, 78.233, 37.719))) * 43758.5453);
+          float tw = 0.5 + 0.5 * sin(uTime * 3.0 + hsh * 60.0 + dot(cameraPosition, vec3(0.7)));
+          float glint = step(0.996, hsh) * tw * smoothstep(0.75, 0.95, vColor.r);
+          outgoingLight += vec3(1.0, 0.98, 0.92) * glint * 0.9;
+          #include <opaque_fragment>`);
+    };
     this.trees = makeTrees(opts.treeDetail ?? 1);
     this.rocks = makeRocks();
     this.treeMat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
@@ -42,29 +60,52 @@ export class World {
     const k1 = Math.floor((z + ahead) / SEG);
     this.T.ensure(z + ahead + SEG);
     const here = Math.floor(z / SEG);
-    let budget = all ? Infinity : 1;
     // Nearest first: the one you are on, then the next ones down, then behind.
     const order = [];
     for (let k = here; k <= k1; k++) order.push(k);
     for (let k = here - 1; k >= k0; k--) order.push(k);
     for (const k of order) {
       if (this.chunks.has(k)) continue;
-      const urgent = k >= here - 1 && k <= here + 2;
-      if (budget <= 0 && !urgent) break;
-      this.chunks.set(k, this._build(k));
-      budget--;
+      // Anything you are about to see that is not ready yet is built right now.
+      const urgent = all || (k >= here - 1 && k <= here + 1);
+      if (urgent) {
+        if (this.job && this.job.k === k) this.job = null;
+        this.chunks.set(k, this._build(k));
+      } else if (!this.job) {
+        this.job = { k, steps: this._steps(k) };
+      }
+    }
+    // The rest is built in slices of a few milliseconds a frame, well ahead of time,
+    // so building never shows up as a stutter.
+    if (this.job) {
+      const t0 = performance.now();
+      while (performance.now() - t0 < 3) {
+        const r = this.job.steps.next();
+        if (r.done) { this.chunks.set(this.job.k, r.value); this.job = null; break; }
+      }
     }
     for (const [k, c] of this.chunks) {
       if (k < k0 - 1 || k > k1 + 1) {
         this.root.remove(c.group);
         c.mesh.geometry.dispose();
         for (const m of c.inst) m.dispose();
+        for (const m of c.extra) m.geometry.dispose();
         this.chunks.delete(k);
       }
     }
   }
 
+  /* Build chunk k in one go. */
   _build(k) {
+    const g = this._steps(k);
+    let r;
+    while (!(r = g.next()).done) { /* keep going */ }
+    return r.value;
+  }
+
+  /* Build chunk k a few rows at a time: a generator that yields between slices, so the
+     work can be spread over several frames. Its return value is the chunk. */
+  *_steps(k) {
     const T = this.T;
     const { dx = 1.6, width = 240 } = this.q;
     // Rows must land exactly on the segment's ends, or neighbouring chunks crack apart.
@@ -80,6 +121,7 @@ export class World {
     for (let j = 0; j < nz + 2; j++) {
       const z = z0 + (j - 1) * dz;
       for (let i = 0; i < nx + 2; i++) H[j * (nx + 2) + i] = T.height(xs + (i - 1) * dx, z);
+      if (j % 6 === 5) yield;
     }
     const pos = new Float32Array(nx * nz * 3);
     const nrm = new Float32Array(nx * nz * 3);
@@ -117,6 +159,7 @@ export class World {
         for (const f of feats) markFeature(f, x, z, c);
         col[v] = c.r; col[v + 1] = c.g; col[v + 2] = c.b;
       }
+      if (j % 10 === 9) yield;
     }
     this._shadeUnder(T.segs.get(k), col, xs, z0, dx, dz, nx, nz);
     const idx = new Uint32Array((nx - 1) * (nz - 1) * 6);
@@ -140,8 +183,95 @@ export class World {
     const group = new THREE.Group();
     group.add(mesh);
     const inst = this._props(T.segs.get(k), group);
+    const extra = this._details(T.segs.get(k), group);
     this.root.add(group);
-    return { group, mesh, inst };
+    return { group, mesh, inst, extra };
+  }
+
+  /* Kickers and cliff bands need far finer detail than the open snow, or they smear
+     into blurs: each gets its own small, finely sampled patch laid over the snow. */
+  _details(seg, group) {
+    const out = [];
+    if (!seg) return out;
+    const T = this.T;
+    for (const f of seg.features) {
+      let g = null;
+      if (f.type === 'kicker') {
+        const half = f.W / 2 + 1.7;
+        g = this._patch(Math.ceil(half * 2 / 0.25), Math.ceil((f.L + 2.4) / 0.16),
+          (i, j, ni, nj) => [f.x - half + (i / ni) * half * 2, f.z - 0.7 + (j / nj) * (f.L + 2.4)],
+          (x, z, ny, c) => {
+            const u = z - f.z, lat = Math.abs(x - f.x);
+            c.copy(SNOW);
+            if (ny < 0.85) c.lerp(SHADE, Math.min(0.7, (0.85 - ny) * 1.6));
+            if (lat < f.W / 2 + 0.1 && u > f.L - 0.55 && u < f.L + 0.08) c.copy(DYE);
+            else if (lat < f.W / 2 && u > 0.3 && u < f.L - 0.55) c.lerp(GROOMED, 0.5);
+          }, 0.02);
+      } else if (f.type === 'drop') {
+        const lip = x => f.z0 + f.zw * Math.sin(x * f.zf + f.zp);
+        const xa = f.xa - 7, xb = f.xb + 7, u0 = -3, u1 = f.run + 2.2;
+        g = this._patch(Math.ceil((xb - xa) / 0.45), Math.ceil((u1 - u0) / 0.14),
+          (i, j, ni, nj) => { const x = xa + (i / ni) * (xb - xa); return [x, lip(x) + u0 + (j / nj) * (u1 - u0)]; },
+          (x, z, ny, c, h) => {
+            c.copy(SNOW);
+            const d = lip(x) - z;
+            if (d > -0.4 && d < 3) c.lerp(CORNICE, 0.55 * (1 - Math.max(0, d) / 3));
+            const rock = smooth(0.78, 0.5, ny);
+            if (rock > 0) {
+              // Bands in the rock, and snow caught on the ledges.
+              const band = 0.5 + 0.5 * Math.sin(h * 1.7 + x * 0.21 + Math.sin(x * 0.9));
+              c.lerp(ROCK, rock).lerp(ROCK_DARK, rock * band * 0.6);
+            }
+          }, 0.03);
+      }
+      if (g) {
+        const m = new THREE.Mesh(g, this.material);
+        m.receiveShadow = true;
+        group.add(m);
+        out.push(m);
+      }
+    }
+    return out;
+  }
+
+  /* A grid of (ni+1) × (nj+1) points placed by `at(i, j, ni, nj) → [x, z]`, lifted
+     `lift` off the snow, coloured by `paintAt(x, z, ny, colour, h)`. */
+  _patch(ni, nj, at, paintAt, lift) {
+    const T = this.T, n = (ni + 1) * (nj + 1);
+    const pos = new Float32Array(n * 3), col = new Float32Array(n * 3);
+    const c = new THREE.Color();
+    for (let j = 0; j <= nj; j++) {
+      for (let i = 0; i <= ni; i++) {
+        const [x, z] = at(i, j, ni, nj);
+        const v = (j * (ni + 1) + i) * 3;
+        pos[v] = x; pos[v + 1] = T.height(x, z) + lift; pos[v + 2] = z;
+      }
+    }
+    const idx = new Uint32Array(ni * nj * 6);
+    let p = 0;
+    for (let j = 0; j < nj; j++) {
+      for (let i = 0; i < ni; i++) {
+        const a = j * (ni + 1) + i, b = a + 1, d = a + ni + 1, e = d + 1;
+        idx[p++] = a; idx[p++] = d; idx[p++] = b;
+        idx[p++] = b; idx[p++] = d; idx[p++] = e;
+      }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    g.setIndex(new THREE.BufferAttribute(idx, 1));
+    g.computeVertexNormals();
+    // Normals may come out facing down depending on winding; make them face up.
+    const nrm = g.attributes.normal;
+    let flip = 0;
+    for (let k = 0; k < nrm.count; k++) flip += nrm.getY(k);
+    if (flip < 0) { for (let k = 0; k < nrm.count; k++) nrm.setXYZ(k, -nrm.getX(k), -nrm.getY(k), -nrm.getZ(k)); g.index.array.reverse(); }
+    for (let k = 0; k < n; k++) {
+      paintAt(pos[k * 3], pos[k * 3 + 2], nrm.getY(k), c, pos[k * 3 + 1]);
+      col[k * 3] = c.r; col[k * 3 + 1] = c.g; col[k * 3 + 2] = c.b;
+    }
+    g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    g.computeBoundingSphere();
+    return g;
   }
 
   /* A soft blue darkening in the snow round the foot of every tree and rock — the
@@ -173,6 +303,7 @@ export class World {
     const rocks = [[], [], []];
     for (const o of seg.obstacles) (o.kind === 'tree' ? byVar : rocks)[o.v].push(o);
     const m = this._m, q = this._q, s = this._s, pp = this._p, e = this._e;
+    const tint = new THREE.Color();
     const add = (geo, list, kind) => {
       if (!list.length) return;
       const im = new THREE.InstancedMesh(geo, this.treeMat, list.length);
@@ -189,6 +320,11 @@ export class World {
         q.setFromEuler(e);
         m.compose(pp, q, s);
         im.setMatrixAt(i, m);
+        // No two trees quite the same shade.
+        const t = (Math.sin(o.x * 12.9898 + o.z * 78.233) * 43758.5453) % 1;
+        const b = 0.86 + 0.24 * Math.abs(t);
+        tint.setRGB(b * (kind === 'tree' ? 0.97 + 0.06 * Math.abs(t) : 1), b, b);
+        im.setColorAt(i, tint);
       });
       im.castShadow = true;
       im.receiveShadow = kind === 'rock';
@@ -205,6 +341,7 @@ export class World {
     for (const c of this.chunks.values()) {
       c.mesh.geometry.dispose();
       for (const m of c.inst) m.dispose();
+      for (const m of c.extra) m.geometry.dispose();
     }
     this.chunks.clear();
     for (const g of [...this.trees, ...this.rocks]) g.dispose();

@@ -162,6 +162,7 @@ function drive(dt) {
     if (pushes && sim.phase === 'run' && p.speed < 12) {
       const k = pushes * 1.4 * (1 - p.speed / 12);
       p.vx += Math.sin(p.psi) * k; p.vz += Math.cos(p.psi) * k;
+      p.skating = 0.5;
     }
     return;
   }

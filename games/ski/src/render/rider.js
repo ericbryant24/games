@@ -121,6 +121,7 @@ export class RiderMesh {
     }
 
     this.crouch = 0;
+    this._skate = 0;
     this.q = new THREE.Quaternion();
     this.up = new THREE.Vector3(0, 1, 0);
     this.nrm = new THREE.Vector3(0, 1, 0);
@@ -174,6 +175,8 @@ export class RiderMesh {
       } else {
         L.thigh.rotation.x = -a;
         L.knee.rotation.x = 2 * a;
+        L.thigh.rotation.z = 0;
+        L.knee.rotation.z = 0;
       }
     }
     // Lean the torso forward to keep the weight over the feet.
@@ -191,10 +194,29 @@ export class RiderMesh {
         if (A.pole) A.pole.rotation.x = 1.25 + 0.4 * c;
       }
     }
-    if (this.skis && !r.air) {
-      // Skis splay a little when braking: a snowplough.
-      const plough = r.brake ? 0.22 * r.brake : 0;
-      this.skis[0].rotation.y = -plough; this.skis[1].rotation.y = plough;
+    if (this.skis) {
+      // Ski 0 is on the -x side, ski 1 on +x. A positive turn about y swings a tip
+      // towards +x.
+      const skate = !r.air && !r.crashed ? Math.min(1, (r.skating || 0) * 4) : 0;
+      this._skate += (skate - (this._skate || 0)) * 0.25;
+      const k = this._skate;
+      // Braking: a snowplough, tips together, tails pushed out.
+      const plough = !r.air && r.brake ? 0.24 * r.brake : 0;
+      // Skating: a V, tips apart, pushing off one ski then the other.
+      const ph = this.time * 7.5, side = Math.sin(ph);
+      for (let i = 0; i < 2; i++) {
+        const sgn = i === 0 ? -1 : 1, L = this.legs[i], ski = this.skis[i];
+        const push = Math.max(0, sgn * side);               // this leg is driving out
+        const spread = k * (0.08 + 0.3 * push);
+        L.thigh.rotation.z = sgn * spread;
+        L.knee.rotation.z = -sgn * spread * 0.4;
+        ski.rotation.y = sgn * (0.38 * k) - sgn * plough;
+        ski.position.x = sgn * (0.13 + 0.8 * Math.sin(spread));
+        ski.position.y = k * 0.07 * Math.max(0, -sgn * side); // the other ski lifts to recover
+      }
+      // Arms swing with the stride.
+      for (const A of this.arms) A.shoulder.rotation.x += k * 0.55 * side * A.s;
+      this.lean.rotation.z += k * 0.08 * side;
     }
     // A slight shuffle when the boarder is braking: the board sweeps across.
     if (board) this.feet.rotation.y = 0;

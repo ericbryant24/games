@@ -111,7 +111,7 @@ export class Controls {
     }
 
     // Poles bite progressively rather than snapping, like leaning onto an edge.
-    this.steer += (ts - this.steer) * Math.min(1, dt * (ts ? 9 : 12));
+    this.steer += (ts - this.steer) * Math.min(1, dt * (ts ? 20 : 24));
     this.vert += (tv - this.vert) * Math.min(1, dt * 14);
     this.brake = brake;
     this.crouch = crouch;

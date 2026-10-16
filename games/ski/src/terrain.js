@@ -89,8 +89,12 @@ export class Terrain {
 
   height(x, z) {
     const dx = x - this.centre(z);
-    let h = this.baseAt(z) + 0.0030 * dx * dx
-      + 1.35 * this.n.noise(x / 38, z / 38)
+    // Off the edge of the run the ground banks up steeply into the forest, so the run
+    // reads as a valley carved down the mountain.
+    const out = Math.max(0, Math.abs(dx) - this.halfWidth(z));
+    let h = this.baseAt(z) + 0.0022 * dx * dx + 0.016 * out * out
+      + 2.6 * this.n.noise(x / 95 - 31.7, z / 95 + 8.2)     // big rolls and gullies
+      + 1.25 * this.n.noise(x / 38, z / 38)
       + 0.40 * this.n.noise(x / 13 + 17.3, z / 13 - 4.1);
     const k = Math.floor(z / SEG);
     if (k >= 1) h -= this.cum[Math.min(k - 1, this.cum.length - 1)];
